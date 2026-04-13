@@ -4,7 +4,7 @@ RestaurIA es un proyecto de TFG orientado a construir un copiloto visual y predi
 
 ## Estado actual
 
-El repositorio queda preparado en **Fase 0: Preparación**. Ya existe una base documental sólida y una estructura inicial profesional para empezar el desarrollo con orden, control de versiones y separación clara entre documentación, código, datos, modelos e infraestructura.
+El repositorio queda preparado para cerrar **Fase 0** y entrar en la primera implementación del MVP. Ya existe una base documental sólida, una estructura profesional de repositorio y un núcleo técnico ejecutable para empezar a iterar con criterio.
 
 ## Objetivo del MVP
 
@@ -41,6 +41,8 @@ restauria/
 - [Documento maestro de arranque](docs/00_overview/04_documento_maestro_de_arranque.md)
 - [Visión general del proyecto](docs/00_overview/01_vision_general.md)
 - [Especificación funcional del MVP](docs/01_producto_y_negocio/03_especificacion_funcional_mvp.md)
+- [Modelo de estados de mesa](docs/02_arquitectura/04_modelo_de_estados_de_mesa.md)
+- [Diccionario de eventos y payloads](docs/03_datos_y_ml/08_diccionario_de_eventos_y_payloads.md)
 - [Fases del proyecto](docs/00_overview/02_fases_del_proyecto.md)
 - [Estructura de repositorio](docs/04_software_y_devops/03_estructura_de_repositorio.md)
 - [Setup local recomendado](docs/04_software_y_devops/04_setup_local.md)
@@ -53,13 +55,30 @@ restauria/
 - Datos brutos, clips, checkpoints y exportaciones pesadas no se versionan.
 - El MVP debe funcionar sin depender de Internet una vez instalado el stack base.
 
+## Arranque rápido
+
+1. Crear entorno virtual.
+2. Instalar dependencias de desarrollo con `pip install -r requirements/dev.txt`.
+3. Levantar la API local con `uvicorn apps.api.main:app --reload`.
+4. Abrir `http://127.0.0.1:8000/docs` para probar el MVP.
+
+## Qué ya existe en código
+
+- API local mínima con FastAPI.
+- Catálogo semilla con una cámara, una zona y una mesa.
+- Máquina de estados de mesa del MVP.
+- Generación de eventos operativos.
+- Gestión de sesiones de mesa.
+- ETA baseline simple basada en histórico.
+- Tests automáticos del flujo principal.
+
 ## Siguientes pasos recomendados
 
-1. Validar y afinar la especificación funcional del MVP ya existente.
-2. Definir la máquina de estados de mesa.
-3. Formalizar el diccionario de eventos.
-4. Levantar la primera API local con endpoints de salud, cámaras, sesiones y eventos.
-5. Implementar el pipeline mínimo `frame -> detección -> evento -> persistencia`.
+1. Añadir persistencia real con SQLAlchemy y Postgres para sesiones, eventos y predicciones.
+2. Modelar configuración editable de cámaras, zonas y mesas.
+3. Implementar el adaptador de captura para pasar de observaciones manuales a observaciones generadas desde vídeo.
+4. Levantar un dashboard mínimo que consuma la API local.
+5. Medir precisión de ocupación, latencia y error medio de ETA en pruebas controladas.
 
 ## Licencia
 

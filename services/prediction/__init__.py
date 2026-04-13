@@ -1,0 +1,2 @@
+"""Prediction services for RestaurIA."""
+

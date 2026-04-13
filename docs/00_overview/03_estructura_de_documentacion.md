@@ -18,6 +18,7 @@ repo_root/
       01_arquitectura_logica.md
       02_arquitectura_fisica_y_despliegue.md
       03_diagrama_textual_de_flujo.md
+      04_modelo_de_estados_de_mesa.md
     03_datos_y_ml/
       01_fuentes_de_datos_y_eventos.md
       02_esquema_de_datos.md
@@ -26,6 +27,7 @@ repo_root/
       05_deep_learning.md
       06_iea_y_motor_de_decision.md
       07_plan_de_datos_y_etiquetado.md
+      08_diccionario_de_eventos_y_payloads.md
     04_software_y_devops/
       01_stack_recomendado.md
       02_programas_paquetes_y_dependencias.md

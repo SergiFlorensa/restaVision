@@ -12,7 +12,7 @@ RestaurIA es un TFG con vocación de evolucionar a producto real: un copiloto vi
 - Priorizar primero el MVP: una cámara, una mesa, eventos, sesiones, dashboard mínimo y ETA baseline.
 
 ## Prioridades inmediatas
-1. Validar y afinar la especificación funcional del MVP ya existente.
-2. Formalizar estados de mesa y transiciones.
-3. Definir diccionario de eventos y payloads.
-4. Preparar el esqueleto técnico de API, persistencia y pipeline de captura.
+1. Sustituir la persistencia en memoria por una capa real con SQLAlchemy y Postgres.
+2. Añadir configuración editable de cámaras, zonas y mesas.
+3. Implementar un adaptador de captura que convierta frames en observaciones del dominio.
+4. Construir el primer dashboard operativo sobre la API local.
