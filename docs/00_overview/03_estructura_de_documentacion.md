@@ -34,6 +34,7 @@ repo_root/
       03_estructura_de_repositorio.md
       04_setup_local.md
       05_licencias_y_decisiones_de_stack.md
+      06_instalacion_gratuita_y_configuracion_local.md
     05_hardware_y_costes/
       01_hardware_minimo_mvp.md
       02_hardware_recomendado_por_fases.md

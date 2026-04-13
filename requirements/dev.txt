@@ -2,9 +2,9 @@
 
 # Calidad, pruebas y herramientas de desarrollo
 pytest
+httpx
 black
 ruff
 mypy
 pre-commit
 ipython
-

@@ -4,6 +4,7 @@ venv/
 env/
 .env
 .env.*
+!.env.example
 .python-version
 
 # Caches y artefactos de Python
@@ -58,4 +59,3 @@ models/checkpoints/*
 !models/checkpoints/.gitkeep
 models/exported/*
 !models/exported/.gitkeep
-

@@ -46,6 +46,7 @@ restauria/
 - [Fases del proyecto](docs/00_overview/02_fases_del_proyecto.md)
 - [Estructura de repositorio](docs/04_software_y_devops/03_estructura_de_repositorio.md)
 - [Setup local recomendado](docs/04_software_y_devops/04_setup_local.md)
+- [Instalación gratuita y configuración local](docs/04_software_y_devops/06_instalacion_gratuita_y_configuracion_local.md)
 - [Backlog inicial](docs/07_ejecucion/02_backlog_inicial.md)
 
 ## Convenciones iniciales
@@ -58,8 +59,9 @@ restauria/
 ## Arranque rápido
 
 1. Crear entorno virtual.
-2. Instalar dependencias de desarrollo con `pip install -r requirements/dev.txt`.
-3. Levantar la API local con `uvicorn apps.api.main:app --reload`.
+2. Ejecutar `.\infra\scripts\setup_local.ps1`.
+3. Copiar `.env.example` a `.env` cuando se vaya a activar PostgreSQL.
+4. Levantar la API local con `.\infra\scripts\run_api.ps1`.
 4. Abrir `http://127.0.0.1:8000/docs` para probar el MVP.
 
 ## Qué ya existe en código
