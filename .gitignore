@@ -1,0 +1,61 @@
+# Entornos virtuales y configuracion local
+.venv/
+venv/
+env/
+.env
+.env.*
+.python-version
+
+# Caches y artefactos de Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Logs, bases locales y builds
+*.log
+*.sqlite3
+*.db
+build/
+dist/
+*.egg-info/
+
+# IDEs y sistema operativo
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Frontend y notebooks
+node_modules/
+.pnpm-store/
+.npm/
+.ipynb_checkpoints/
+
+# Secretos y claves
+*.pem
+*.key
+*.crt
+
+# Datos operativos y artefactos pesados
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/annotations/*
+!data/annotations/.gitkeep
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/exported/*
+!models/exported/.gitkeep
+

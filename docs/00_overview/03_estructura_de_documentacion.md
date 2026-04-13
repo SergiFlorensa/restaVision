@@ -1,0 +1,52 @@
+# Estructura de documentación
+
+```text
+repo_root/
+  README.md
+  docs/
+    README.md
+    00_overview/
+      01_vision_general.md
+      02_fases_del_proyecto.md
+      03_estructura_de_documentacion.md
+      04_documento_maestro_de_arranque.md
+    01_producto_y_negocio/
+      01_problema_y_propuesta_de_valor.md
+      02_kpis_y_metricas_de_negocio.md
+      03_especificacion_funcional_mvp.md
+    02_arquitectura/
+      01_arquitectura_logica.md
+      02_arquitectura_fisica_y_despliegue.md
+      03_diagrama_textual_de_flujo.md
+    03_datos_y_ml/
+      01_fuentes_de_datos_y_eventos.md
+      02_esquema_de_datos.md
+      03_computer_vision.md
+      04_machine_learning.md
+      05_deep_learning.md
+      06_iea_y_motor_de_decision.md
+      07_plan_de_datos_y_etiquetado.md
+    04_software_y_devops/
+      01_stack_recomendado.md
+      02_programas_paquetes_y_dependencias.md
+      03_estructura_de_repositorio.md
+      04_setup_local.md
+      05_licencias_y_decisiones_de_stack.md
+    05_hardware_y_costes/
+      01_hardware_minimo_mvp.md
+      02_hardware_recomendado_por_fases.md
+      03_presupuestos_orientativos.md
+      04_compra_sugerida_inicial.md
+    06_legal_y_riesgos/
+      01_privacidad_videovigilancia.md
+      02_riesgos_y_mitigaciones.md
+      03_politica_de_uso_aceptable.md
+    07_ejecucion/
+      01_roadmap_12_semanas.md
+      02_backlog_inicial.md
+      03_plan_de_validacion.md
+      04_criterios_de_done.md
+    08_referencias/
+      01_fuentes_oficiales.md
+      02_decisiones_de_arquitectura.md
+```

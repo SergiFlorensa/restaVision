@@ -1,0 +1,10 @@
+-r base.txt
+
+# Calidad, pruebas y herramientas de desarrollo
+pytest
+black
+ruff
+mypy
+pre-commit
+ipython
+

@@ -1,0 +1,12 @@
+-r base.txt
+
+# Visión artificial y ML del MVP
+opencv-python
+scikit-learn
+matplotlib
+torch
+torchvision
+onnxruntime
+
+# Activar cuando el hardware y el pipeline lo requieran
+# openvino

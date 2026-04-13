@@ -1,0 +1,10 @@
+# Dependencias base del backend y utilidades comunes
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+psycopg[binary]
+python-dotenv
+numpy
+pandas
+

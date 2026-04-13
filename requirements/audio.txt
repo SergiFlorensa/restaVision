@@ -1,0 +1,8 @@
+-r base.txt
+
+# Módulos opcionales para exploración de audio local
+vosk
+
+# Evaluar solo si aporta al caso de uso
+# pywhispercpp
+# sounddevice
