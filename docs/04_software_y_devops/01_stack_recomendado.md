@@ -26,6 +26,7 @@
 
 ## Aceleración de inferencia
 - OpenVINO — https://docs.openvino.ai/
+- HailoRT / toolchain Hailo (si se adopta NPU Hailo-8L como backend opcional de inferencia)
 
 ## Contenerización
 - Docker / Docker Desktop (evaluar licencia y uso)

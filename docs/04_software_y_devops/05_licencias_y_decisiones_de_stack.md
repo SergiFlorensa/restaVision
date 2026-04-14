@@ -14,6 +14,10 @@ Mantener el proyecto lo más open source y reutilizable posible.
 - whisper.cpp — MIT — https://github.com/ggml-org/whisper.cpp
 
 ## Herramientas a vigilar
+
+### Toolchain de Hailo (si se usa Hailo-8L)
+Puede aportar ventajas claras de rendimiento/watt en edge, pero hay que revisar con detalle términos de SDK, drivers y redistribución antes de uso comercial.
+
 ### Ultralytics YOLO
 Muy útil, pero con AGPL-3.0 para su edición open source.  
 Si el proyecto se comercializa de forma cerrada, hay que revisar cuidadosamente esa implicación.  
