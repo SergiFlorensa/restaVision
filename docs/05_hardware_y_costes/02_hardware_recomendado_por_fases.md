@@ -19,6 +19,10 @@ Jetson Orin Nano Super Developer Kit si hace falta edge GPU dedicado.
 Referencia oficial: https://www.nvidia.com/en-us/autonomous-machines/embedded-systems/jetson-orin/nano-super-developer-kit/  
 Referencia de kits: https://developer.nvidia.com/embedded/jetson-developer-kits
 
+### Opción NPU dedicada (Hailo-8L)
+Acelerador NPU para inferencia eficiente en edge cuando el objetivo principal es detección en tiempo real con bajo consumo.
+Se recomienda usarlo detrás de un adaptador de inferencia desacoplado del dominio para evitar lock-in de hardware.
+
 ## Fase 4 — Audio
 - auricular abierto o discreto,
 - micrófono direccional si se prueban comandos de voz.
