@@ -33,3 +33,11 @@ Puede usarse gratis en personal/educación y pequeñas empresas dentro de cierto
 - prototipado rápido permitido,
 - documentar toda decisión de licencia,
 - antes de vender: auditoría completa del stack y dependencias.
+
+## Decisión de lenguaje para visión
+Referencia específica:
+- `docs/04_software_y_devops/11_decision_python_vs_cpp_para_vision.md`
+
+Decisión actual:
+- Python como base del sistema,
+- C++ solo como posible aceleración futura de módulos aislados si la latencia real lo exige.

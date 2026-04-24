@@ -42,12 +42,15 @@ restauria/
 - [Visión general del proyecto](docs/00_overview/01_vision_general.md)
 - [Especificación funcional del MVP](docs/01_producto_y_negocio/03_especificacion_funcional_mvp.md)
 - [Modelo de estados de mesa](docs/02_arquitectura/04_modelo_de_estados_de_mesa.md)
+- [Escalabilidad y sistemas distribuidos](docs/02_arquitectura/05_escalabilidad_y_sistemas_distribuidos.md)
 - [Diccionario de eventos y payloads](docs/03_datos_y_ml/08_diccionario_de_eventos_y_payloads.md)
 - [Fases del proyecto](docs/00_overview/02_fases_del_proyecto.md)
 - [Estructura de repositorio](docs/04_software_y_devops/03_estructura_de_repositorio.md)
 - [Setup local recomendado](docs/04_software_y_devops/04_setup_local.md)
 - [Instalación gratuita y configuración local](docs/04_software_y_devops/06_instalacion_gratuita_y_configuracion_local.md)
+- [Pipeline ligero para cámara única](docs/04_software_y_devops/12_pipeline_ligero_para_camara_unica.md)
 - [Backlog inicial](docs/07_ejecucion/02_backlog_inicial.md)
+- [Plan de desarrollo por partes desde NotebookLM](docs/07_ejecucion/05_plan_de_desarrollo_por_partes_desde_notebooklm.md)
 
 ## Convenciones iniciales
 
@@ -72,15 +75,24 @@ restauria/
 - Generación de eventos operativos.
 - Gestión de sesiones de mesa.
 - ETA baseline simple basada en histórico.
+- Alertas operativas suaves basadas en duracion de sesion.
+- Opción de rechazo para observaciones de baja confianza.
+- Matriz de pérdida reutilizable para decisiones bajo incertidumbre.
+- Suavizado Kalman ligero para bounding boxes.
+- PCA, whitening, correlación y estadísticos suficientes para features tabulares.
+- Comité ponderado para combinar probabilidades de fuentes ligeras.
+- Motor proxémico prudente para distancias, densidad, contacto staff-mesa y avisos de voz limitados.
+- Parser y orquestador de María para análisis multimodal puntual por triggers.
+- Persistencia opcional con SQLAlchemy/PostgreSQL para catálogo, runtime, sesiones, eventos y predicciones.
+- Configuración editable mínima de cámaras, zonas y mesas desde la API.
 - Tests automáticos del flujo principal.
 
 ## Siguientes pasos recomendados
 
-1. Añadir persistencia real con SQLAlchemy y Postgres para sesiones, eventos y predicciones.
-2. Modelar configuración editable de cámaras, zonas y mesas.
-3. Implementar el adaptador de captura para pasar de observaciones manuales a observaciones generadas desde vídeo.
-4. Levantar un dashboard mínimo que consuma la API local.
-5. Medir precisión de ocupación, latencia y error medio de ETA en pruebas controladas.
+1. Validar `ENABLE_POSTGRES=true` contra PostgreSQL local.
+2. Implementar el adaptador de captura para pasar de observaciones manuales a observaciones generadas desde vídeo.
+3. Levantar un dashboard mínimo que consuma la API local.
+4. Medir precisión de ocupación, latencia y error medio de ETA en pruebas controladas.
 
 ## Licencia
 

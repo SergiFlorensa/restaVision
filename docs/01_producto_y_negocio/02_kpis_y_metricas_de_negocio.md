@@ -12,6 +12,9 @@
 - covers por servicio,
 - tiempo improductivo entre salida y siguiente ocupación,
 - número de grupos rechazados innecesariamente.
+- carga ofrecida por franja (`erlangs`),
+- probabilidad estimada de saturación o bloqueo,
+- capacidad activa efectiva por zona.
 
 ## KPIs de experiencia
 - reducción de esperas exageradas o falsas expectativas,

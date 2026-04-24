@@ -42,3 +42,28 @@ Si entra un grupo, ¿cuánto tiempo realista debería esperar?
 
 ## Recomendación
 Antes de usar deep learning temporal, construir baselines clásicos fuertes y explicables.
+
+## Estado aplicado en MVP
+Ya existe una primera pieza de anomalias operativas en `services/alerts/anomaly.py`.
+
+Caracteristicas:
+- usa solo estadistica descriptiva sobre duracion de sesiones,
+- exige historico minimo antes de alertar,
+- expone evidencia numerica en `GET /api/v1/alerts`,
+- no introduce dependencias pesadas,
+- no automatiza acusaciones de impago ni inferencias sensibles.
+
+Tambien se aplica teoria de decision de forma ligera:
+- `services/decision/policy.py` define matriz de perdida y perdida esperada,
+- la FSM usa opcion de rechazo para observaciones de baja confianza,
+- `services/vision/kalman.py` prepara tracking secuencial ligero para bounding boxes.
+- `services/features/preprocessing.py` aporta PCA, whitening, correlacion y estadisticos suficientes.
+- `services/decision/committee.py` combina probabilidades de fuentes ligeras antes de decidir.
+- `services/maria/orchestrator.py` decide cuándo invocar analisis multimodal puntual en lugar de procesar cada frame.
+
+## Documento complementario
+- `docs/03_datos_y_ml/18_ml_clasico_y_modelado_predictivo.md`
+- `docs/03_datos_y_ml/26_anomalias_operativas_estadisticas.md`
+- `docs/03_datos_y_ml/27_prml_decision_y_tracking.md`
+- `docs/03_datos_y_ml/28_pca_whitening_y_comites.md`
+- `docs/04_software_y_devops/13_maria_flujo_doble_velocidad.md`

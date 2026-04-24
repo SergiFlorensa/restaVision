@@ -99,6 +99,17 @@ En el MVP actual esta transición se modela mediante endpoint manual.
 - `finalizing` es una ayuda operativa, no una verdad absoluta.
 - Toda transición relevante debe dejar rastro mediante eventos.
 
+## Opción de rechazo
+La FSM no debe cambiar de estado con observaciones poco fiables.
+
+Si una observación llega por debajo de `min_transition_confidence`:
+- se registra `people_counted`,
+- se registra `low_confidence_observation`,
+- no se crea ni se cierra sesión,
+- no se modifica el estado operativo de la mesa.
+
+Esto aplica de forma práctica la separación entre inferencia y decisión: la cámara puede ver una señal dudosa, pero el software no tiene por qué actuar sobre ella.
+
 ## Traducción a producto
 Esta máquina de estados permite responder ya a preguntas útiles:
 - si una mesa está realmente disponible,
@@ -106,4 +117,3 @@ Esta máquina de estados permite responder ya a preguntas útiles:
 - si parece estar entrando en fase de cierre,
 - cuándo terminó la sesión anterior,
 - y si todavía queda una acción operativa pendiente antes de reasignarla.
-

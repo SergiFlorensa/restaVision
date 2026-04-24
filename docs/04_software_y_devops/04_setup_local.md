@@ -20,14 +20,27 @@ Levantar FastAPI y exponer endpoints básicos:
 - predictions.
 
 ## Paso 4 — Base de datos
-Crear tablas mínimas:
-- tables,
-- zones,
-- sessions,
-- events.
+La API puede trabajar en dos modos:
+- memoria local, por defecto, para pruebas rápidas,
+- SQLAlchemy/PostgreSQL si `ENABLE_POSTGRES=true`.
+
+Con PostgreSQL activo, el ORM crea las tablas mínimas al arrancar:
+- `cameras`,
+- `zones`,
+- `tables`,
+- `table_runtime`,
+- `sessions`,
+- `events`,
+- `predictions`.
+
+Referencia:
+- `docs/03_datos_y_ml/02_esquema_de_datos.md`
 
 ## Paso 5 — Captura
 Conectar webcam y guardar secuencias cortas.
+
+Referencia técnica:
+- `docs/04_software_y_devops/07_opencv_y_adapter_de_captura.md`
 
 ## Paso 6 — Primer pipeline
 - frame → detección → conteo → evento → guardado.

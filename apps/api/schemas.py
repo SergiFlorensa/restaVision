@@ -17,6 +17,26 @@ class CameraResponse(BaseModel):
     status: str
 
 
+class CameraUpsertRequest(BaseModel):
+    camera_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    status: str = Field(default="online", min_length=1)
+
+
+class ZoneResponse(BaseModel):
+    zone_id: str
+    name: str
+    camera_id: str
+    polygon_definition: list[list[int]]
+
+
+class ZoneUpsertRequest(BaseModel):
+    zone_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    camera_id: str = Field(min_length=1)
+    polygon_definition: list[list[int]]
+
+
 class TableResponse(BaseModel):
     table_id: str
     name: str
@@ -27,6 +47,14 @@ class TableResponse(BaseModel):
     people_count_peak: int
     active_session_id: str | None
     updated_at: datetime | None
+
+
+class TableUpsertRequest(BaseModel):
+    table_id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    capacity: int = Field(gt=0)
+    zone_id: str = Field(min_length=1)
+    active: bool = True
 
 
 class SessionResponse(BaseModel):
@@ -64,6 +92,18 @@ class PredictionResponse(BaseModel):
     upper_bound: float
     confidence: float
     explanation: str
+
+
+class AlertResponse(BaseModel):
+    alert_id: str
+    ts: datetime
+    table_id: str
+    session_id: str | None
+    alert_type: str
+    severity: str
+    message: str
+    score: float
+    evidence_json: dict[str, object]
 
 
 class ObservationRequest(BaseModel):

@@ -5,6 +5,10 @@
    ↓
 [Captura de frames]
    ↓
+[Corrección geométrica / vista cenital opcional]
+   ↓
+[Video-to-Observation Adapter]
+   ↓
 [Detección + tracking]
    ↓
 [Asignación a zonas / mesas]

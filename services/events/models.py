@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class TableState(str, Enum):
+class TableState(StrEnum):
     READY = "ready"
     OCCUPIED = "occupied"
     FINALIZING = "finalizing"
@@ -14,7 +14,7 @@ class TableState(str, Enum):
     PENDING_CLEANING = "pending_cleaning"
 
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     PEOPLE_COUNTED = "people_counted"
     ENTRY_TO_TABLE = "entry_to_table"
     EXIT_FROM_TABLE = "exit_from_table"
@@ -25,6 +25,9 @@ class EventType(str, Enum):
     TABLE_STATE_CHANGED = "table_state_changed"
     TABLE_PENDING_CLEANING = "table_pending_cleaning"
     TABLE_READY = "table_ready"
+    LOW_CONFIDENCE_OBSERVATION = "low_confidence_observation"
+    OCCLUSION_SUSPECTED = "occlusion_suspected"
+    CAMERA_BLOCKED = "camera_blocked"
 
 
 @dataclass(slots=True)
@@ -128,4 +131,3 @@ class ObservationResult:
     session: TableSession | None
     events: list[DomainEvent]
     prediction: TablePrediction | None
-

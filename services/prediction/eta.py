@@ -25,7 +25,11 @@ class EtaBaselineService:
         ]
         if completed_durations:
             baseline_duration = float(mean(completed_durations))
-            spread = float(pstdev(completed_durations)) if len(completed_durations) > 1 else baseline_duration * 0.2
+            spread = (
+                float(pstdev(completed_durations))
+                if len(completed_durations) > 1
+                else baseline_duration * 0.2
+            )
             confidence = min(0.9, 0.45 + (0.1 * min(len(completed_durations), 4)))
             explanation = (
                 f"ETA baseline basada en {len(completed_durations)} sesiones cerradas "
@@ -35,7 +39,9 @@ class EtaBaselineService:
             baseline_duration = float(self.default_session_duration_seconds)
             spread = baseline_duration * 0.3
             confidence = 0.35
-            explanation = "ETA baseline usando duracion por defecto mientras se construye historico real."
+            explanation = (
+                "ETA baseline usando duracion por defecto mientras se construye historico real."
+            )
 
         elapsed_seconds = max(int((now - active_session.start_ts).total_seconds()), 0)
         remaining_seconds = max(baseline_duration - elapsed_seconds, 0.0)

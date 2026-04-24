@@ -1,11 +1,27 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException, Request, status
+from services.alerts.anomaly import OperationalAlert
+from services.events.models import (
+    CameraStatus,
+    DomainEvent,
+    TableDefinition,
+    TableObservation,
+    TablePrediction,
+    TableSession,
+    TableSnapshot,
+    ZoneDefinition,
+)
+from services.events.persistence import SqlAlchemyMVPRepository
+from services.events.service import RestaurantMVPService
+from services.events.settings import PersistenceSettings
 
 from apps.api.schemas import (
+    AlertResponse,
     CameraResponse,
+    CameraUpsertRequest,
     EventResponse,
     HealthResponse,
     MarkReadyRequest,
@@ -14,18 +30,19 @@ from apps.api.schemas import (
     PredictionResponse,
     SessionResponse,
     TableResponse,
+    TableUpsertRequest,
+    ZoneResponse,
+    ZoneUpsertRequest,
 )
-from services.events.models import DomainEvent, TableObservation, TablePrediction, TableSession, TableSnapshot
-from services.events.service import RestaurantMVPService
 
 
-def create_app() -> FastAPI:
+def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
     app = FastAPI(
         title="RestaurIA MVP API",
         version="0.1.0",
         summary="Local MVP API for the RestaurIA operational copilot.",
     )
-    app.state.mvp_service = RestaurantMVPService()
+    app.state.mvp_service = mvp_service or build_mvp_service_from_environment()
 
     @app.get("/", tags=["root"])
     def root() -> dict[str, str]:
@@ -40,7 +57,7 @@ def create_app() -> FastAPI:
         return HealthResponse(
             status="ok",
             environment="local",
-            now=datetime.now(timezone.utc),
+            now=datetime.now(UTC),
         )
 
     @app.get("/api/v1/cameras", response_model=list[CameraResponse], tags=["catalog"])
@@ -51,10 +68,75 @@ def create_app() -> FastAPI:
             for camera in service.list_cameras()
         ]
 
+    @app.post(
+        "/api/v1/cameras",
+        response_model=CameraResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["catalog"],
+    )
+    def upsert_camera(request: Request, payload: CameraUpsertRequest) -> CameraResponse:
+        service = get_service(request)
+        camera = service.upsert_camera(
+            CameraStatus(
+                camera_id=payload.camera_id,
+                name=payload.name,
+                status=payload.status,
+            )
+        )
+        return CameraResponse(camera_id=camera.camera_id, name=camera.name, status=camera.status)
+
+    @app.get("/api/v1/zones", response_model=list[ZoneResponse], tags=["catalog"])
+    def list_zones(request: Request) -> list[ZoneResponse]:
+        service = get_service(request)
+        return [serialize_zone(zone) for zone in service.list_zones()]
+
+    @app.post(
+        "/api/v1/zones",
+        response_model=ZoneResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["catalog"],
+    )
+    def upsert_zone(request: Request, payload: ZoneUpsertRequest) -> ZoneResponse:
+        service = get_service(request)
+        try:
+            zone = service.upsert_zone(
+                ZoneDefinition(
+                    zone_id=payload.zone_id,
+                    name=payload.name,
+                    camera_id=payload.camera_id,
+                    polygon_definition=payload.polygon_definition,
+                )
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_zone(zone)
+
     @app.get("/api/v1/tables", response_model=list[TableResponse], tags=["catalog"])
     def list_tables(request: Request) -> list[TableResponse]:
         service = get_service(request)
         return [serialize_table(table) for table in service.list_table_snapshots()]
+
+    @app.post(
+        "/api/v1/tables",
+        response_model=TableResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["catalog"],
+    )
+    def upsert_table(request: Request, payload: TableUpsertRequest) -> TableResponse:
+        service = get_service(request)
+        try:
+            table = service.upsert_table(
+                TableDefinition(
+                    table_id=payload.table_id,
+                    name=payload.name,
+                    capacity=payload.capacity,
+                    zone_id=payload.zone_id,
+                    active=payload.active,
+                )
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_table(table)
 
     @app.get("/api/v1/sessions", response_model=list[SessionResponse], tags=["state"])
     def list_sessions(request: Request) -> list[SessionResponse]:
@@ -69,7 +151,14 @@ def create_app() -> FastAPI:
     @app.get("/api/v1/predictions", response_model=list[PredictionResponse], tags=["prediction"])
     def list_predictions(request: Request, limit: int = 50) -> list[PredictionResponse]:
         service = get_service(request)
-        return [serialize_prediction(prediction) for prediction in service.list_predictions(limit=limit)]
+        return [
+            serialize_prediction(prediction) for prediction in service.list_predictions(limit=limit)
+        ]
+
+    @app.get("/api/v1/alerts", response_model=list[AlertResponse], tags=["alerts"])
+    def list_alerts(request: Request, limit: int = 50) -> list[AlertResponse]:
+        service = get_service(request)
+        return [serialize_alert(alert) for alert in service.list_alerts(limit=limit)]
 
     @app.post(
         "/api/v1/observations",
@@ -101,7 +190,9 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/api/v1/tables/{table_id}/ready", response_model=TableResponse, tags=["state"])
-    def mark_table_ready(request: Request, table_id: str, payload: MarkReadyRequest) -> TableResponse:
+    def mark_table_ready(
+        request: Request, table_id: str, payload: MarkReadyRequest
+    ) -> TableResponse:
         service = get_service(request)
         try:
             snapshot = service.mark_table_ready(table_id=table_id, observed_at=payload.observed_at)
@@ -112,6 +203,16 @@ def create_app() -> FastAPI:
         return serialize_table(snapshot)
 
     return app
+
+
+def build_mvp_service_from_environment() -> RestaurantMVPService:
+    settings = PersistenceSettings.from_environment()
+    repository = None
+    if settings.enable_postgres:
+        if settings.database_url is None:
+            raise RuntimeError("DATABASE_URL is required when PostgreSQL persistence is enabled.")
+        repository = SqlAlchemyMVPRepository(settings.database_url)
+    return RestaurantMVPService(repository=repository)
 
 
 def get_service(request: Request) -> RestaurantMVPService:
@@ -129,6 +230,15 @@ def serialize_table(snapshot: TableSnapshot) -> TableResponse:
         people_count_peak=snapshot.people_count_peak,
         active_session_id=snapshot.active_session_id,
         updated_at=snapshot.updated_at,
+    )
+
+
+def serialize_zone(zone: ZoneDefinition) -> ZoneResponse:
+    return ZoneResponse(
+        zone_id=zone.zone_id,
+        name=zone.name,
+        camera_id=zone.camera_id,
+        polygon_definition=zone.polygon_definition,
     )
 
 
@@ -170,6 +280,20 @@ def serialize_prediction(prediction: TablePrediction) -> PredictionResponse:
         upper_bound=prediction.upper_bound,
         confidence=prediction.confidence,
         explanation=prediction.explanation,
+    )
+
+
+def serialize_alert(alert: OperationalAlert) -> AlertResponse:
+    return AlertResponse(
+        alert_id=alert.alert_id,
+        ts=alert.ts,
+        table_id=alert.table_id,
+        session_id=alert.session_id,
+        alert_type=alert.alert_type.value,
+        severity=alert.severity.value,
+        message=alert.message,
+        score=alert.score,
+        evidence_json=alert.evidence_json,
     )
 
 

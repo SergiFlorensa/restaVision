@@ -40,6 +40,9 @@
 - sin pago
 - sin dependencia externa
 
+Nota de decisión:
+- mantener Python como lenguaje principal del proyecto; evaluar C++ solo para módulos concretos si el profiling real demuestra un cuello de botella.
+
 ### Piloto más serio
 - añadir Grafana,
 - añadir OpenVINO,

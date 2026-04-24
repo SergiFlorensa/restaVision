@@ -23,6 +23,11 @@ Vídeo de cámara(s).
 - persona_sale_de_zona,
 - mesa_pendiente_de_limpieza,
 - mesa_lista.
+- grupo_llega,
+- grupo_espera,
+- grupo_abandona_sin_servicio.
+- grupo_bloqueado_por_capacidad,
+- grupo_sentado_desde_espera.
 
 ## Eventos fase 3+
 - posible_interaccion_de_pago,
@@ -32,3 +37,10 @@ Vídeo de cámara(s).
 
 ## Regla de oro
 Primero construir un buen sistema de eventos. Sin eso, el ML acaba siendo frágil y opaco.
+
+## Regla adicional
+Si se quiere usar teoría de colas o analítica de capacidad, el sistema debe poder reconstruir con fiabilidad:
+- llegadas,
+- inicios de ocupación,
+- liberaciones,
+- y disponibilidad real de mesas.

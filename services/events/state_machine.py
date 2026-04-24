@@ -18,6 +18,7 @@ from services.events.models import (
 @dataclass(slots=True)
 class StateMachineConfig:
     min_seconds_before_finalizing: int = 900
+    min_transition_confidence: float = 0.65
 
 
 @dataclass(slots=True)
@@ -52,6 +53,23 @@ class TableStateMachine:
                 },
             )
         ]
+
+        if observation.confidence < self.config.min_transition_confidence:
+            runtime.updated_at = observation.observed_at
+            events.append(
+                self._event(
+                    event_type=EventType.LOW_CONFIDENCE_OBSERVATION,
+                    observation=observation,
+                    payload={
+                        "people_count": observation.people_count,
+                        "confidence": observation.confidence,
+                        "min_transition_confidence": self.config.min_transition_confidence,
+                        "decision": "reject_state_transition",
+                    },
+                )
+            )
+            return TransitionResult(runtime=runtime, events=events, session_upsert=None)
+
         session_upsert = active_session
         previous_state = runtime.state
         previous_count = runtime.last_people_count
@@ -138,7 +156,11 @@ class TableStateMachine:
                 ]
             )
         elif observation.people_count > 0 and active_session is not None:
-            peak = max(active_session.people_count_peak, runtime.people_count_peak, observation.people_count)
+            peak = max(
+                active_session.people_count_peak,
+                runtime.people_count_peak,
+                observation.people_count,
+            )
             session_upsert = replace(active_session, people_count_peak=peak)
             runtime.people_count_peak = peak
             if self._should_mark_finalizing(
@@ -207,4 +229,3 @@ class TableStateMachine:
     @staticmethod
     def _new_id(prefix: str) -> str:
         return f"{prefix}_{uuid4().hex[:12]}"
-

@@ -41,3 +41,5 @@ Mitigación:
 ### Acusaciones erróneas de impago
 Mitigación:
 - hablar siempre de “riesgo” o “anomalía”, nunca de certeza automática.
+- en el MVP solo se implementan alertas operativas como `long_session_attention`,
+- no se automatiza la etiqueta "impago" ni se infiere intencion de clientes.

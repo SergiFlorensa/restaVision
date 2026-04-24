@@ -19,6 +19,7 @@ repo_root/
       02_arquitectura_fisica_y_despliegue.md
       03_diagrama_textual_de_flujo.md
       04_modelo_de_estados_de_mesa.md
+      05_escalabilidad_y_sistemas_distribuidos.md
     03_datos_y_ml/
       01_fuentes_de_datos_y_eventos.md
       02_esquema_de_datos.md
@@ -27,6 +28,28 @@ repo_root/
       05_deep_learning.md
       06_iea_y_motor_de_decision.md
       07_plan_de_datos_y_etiquetado.md
+      08_marco_teorico_proxemica_y_comportamiento.md
+      09_rois_zonas_y_operadores_de_imagen.md
+      10_preprocesado_y_limpieza_de_senal_visual.md
+      11_transformaciones_geometricas_y_rectificacion.md
+      12_histogramas_y_matching_visual.md
+      13_contornos_y_metricas_geometricas.md
+      14_sustraccion_de_fondo_y_segmentacion_de_primer_plano.md
+      15_tracking_y_movimiento_temporal.md
+      16_calibracion_de_camara_y_precision_metrica.md
+      17_proyeccion_operativa_y_vista_cenital.md
+      18_ml_clasico_y_modelado_predictivo.md
+      19_random_forest_para_eta_de_liberacion.md
+      20_segmentacion_avanzada_y_restauracion.md
+      21_autosetup_geometrico_y_asignacion_espacial.md
+      22_estabilizacion_y_validacion_temporal.md
+      23_objdetect_y_features_aprendidas.md
+      24_teoria_de_colas_y_capacidad_operativa.md
+      25_iou_nms_y_asignacion_espacial.md
+      26_anomalias_operativas_estadisticas.md
+      27_prml_decision_y_tracking.md
+      28_pca_whitening_y_comites.md
+      29_proxemica_operativa_y_voz.md
       08_diccionario_de_eventos_y_payloads.md
     04_software_y_devops/
       01_stack_recomendado.md
@@ -35,11 +58,26 @@ repo_root/
       04_setup_local.md
       05_licencias_y_decisiones_de_stack.md
       06_instalacion_gratuita_y_configuracion_local.md
+      07_opencv_y_adapter_de_captura.md
+      08_highgui_herramienta_de_calibracion.md
+      09_video_to_observation_adapter.md
+      10_estrategia_de_latencia_y_rendimiento.md
+      11_decision_python_vs_cpp_para_vision.md
+      12_pipeline_ligero_para_camara_unica.md
+      13_maria_flujo_doble_velocidad.md
+      14_edge_ai_cpu_local.md
+      15_feature_store_lineage_y_salud.md
+      16_oclusiones_tracking_y_benchmark.md
+      17_transfer_learning_confianza_y_explicabilidad.md
+      18_validacion_cientifica_y_metricas_ml.md
+      19_mlops_release_gate_y_gobernanza.md
+      20_mml_matematicas_aplicadas_anomalias.md
     05_hardware_y_costes/
       01_hardware_minimo_mvp.md
       02_hardware_recomendado_por_fases.md
       03_presupuestos_orientativos.md
       04_compra_sugerida_inicial.md
+      05_integracion_npu_hailo8l.md
     06_legal_y_riesgos/
       01_privacidad_videovigilancia.md
       02_riesgos_y_mitigaciones.md
@@ -49,6 +87,7 @@ repo_root/
       02_backlog_inicial.md
       03_plan_de_validacion.md
       04_criterios_de_done.md
+      05_plan_de_desarrollo_por_partes_desde_notebooklm.md
     08_referencias/
       01_fuentes_oficiales.md
       02_decisiones_de_arquitectura.md

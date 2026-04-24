@@ -59,11 +59,12 @@ Ese script:
 - ejecuta los tests.
 
 ### Paso 2. PostgreSQL
-PostgreSQL hace falta en cuanto pasemos de la persistencia en memoria actual a persistencia real con SQLAlchemy.
+PostgreSQL hace falta para ejecutar la persistencia real fuera del modo memoria.
 
 Ahora mismo:
 - el MVP ya funciona sin Postgres,
-- pero la siguiente fase técnica seria sí debe usarlo.
+- existe una capa SQLAlchemy opcional,
+- y Postgres debe activarse cuando se quiera conservar sesiones, eventos y predicciones entre reinicios reales de la API.
 
 ## Qué instalar de PostgreSQL
 
@@ -101,8 +102,8 @@ Ese script crea:
 ### Ahora mismo
 Puedes dejarlo instalado ya para no frenarte después.
 
-### Justo antes de la persistencia real
-Es el momento obligatorio.
+### Para probar persistencia real
+Es el momento obligatorio cuando quieras validar el flujo completo contra `restauria_dev`.
 
 Cuando empecemos:
 - modelos ORM,
@@ -111,7 +112,7 @@ Cuando empecemos:
 - eventos persistidos,
 - predicciones guardadas,
 
-entonces Postgres deja de ser opcional.
+entonces Postgres deja de ser opcional. La API crea el esquema ORM al arrancar si `ENABLE_POSTGRES=true`.
 
 ## Cómo crear la base de datos
 
@@ -175,4 +176,4 @@ O directamente:
 - servicios cloud.
 
 ## Siguiente paso técnico recomendado
-El siguiente bloque serio del proyecto es sustituir la persistencia en memoria por persistencia real con SQLAlchemy y PostgreSQL.
+El siguiente bloque serio del proyecto es probar la persistencia contra PostgreSQL local y, después, añadir configuración editable de cámaras, zonas y mesas.
