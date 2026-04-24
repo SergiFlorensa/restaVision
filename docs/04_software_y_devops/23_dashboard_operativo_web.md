@@ -68,24 +68,58 @@ Cada sección abre una pantalla propia preparada para datos reales. Las acciones
 La zona de cámara queda preparada de dos formas:
 
 - webcam local desde navegador, usando permiso de cámara;
-- stream servido por backend mediante `VITE_CAMERA_STREAM_URL`.
+- stream servido por backend mediante `VITE_CAMERA_STREAM_URL`;
+- modo demo local con `/api/v1/demo/person-detection/stream`, que abre la webcam en el backend y dibuja detección básica de presencia humana;
+- modo YOLO restaurante con `/api/v1/demo/yolo-restaurant/stream`, que dibuja personas y objetos COCO útiles para probar una mesa doméstica o una sala real sin activar todavía decisiones de negocio.
 
 Variables disponibles en `apps/dashboard/.env.example`:
 
 ```text
 VITE_API_BASE_URL=http://127.0.0.1:8000
-VITE_CAMERA_STREAM_URL=
+VITE_CAMERA_STREAM_URL=http://127.0.0.1:8000/api/v1/demo/yolo-restaurant/stream?source=0&image_size=320
 ```
 
-El stream real deberá servirse desde backend cuando el pipeline de captura esté estabilizado. Para MJPEG puede usarse una etiqueta `img`; para WebRTC o vídeo real se podrá evolucionar el componente sin cambiar el layout.
+El modo demo OpenCV usa cascada Haar frontal y fallback HOG de persona. El modo `yolo-restaurant` usa Ultralytics YOLO con clases COCO filtradas (`person`, `chair`, `dining table`, `cup`, `bottle`, `wine glass`, `bowl`, `fork`, `knife`, `spoon`, `pizza`). Ambos sirven para verificar cámara, overlay y flujo visual local; no identifican personas y no sustituyen la decisión final basada en ROI, tracking y reglas temporales.
+
+Para probarlo:
+
+```powershell
+uvicorn apps.api.main:app --reload
+cd apps/dashboard
+npm run dev
+```
+
+Después abrir `http://127.0.0.1:5173`.
 
 ## Próximos pasos
 
 1. Añadir cliente API tipado para FastAPI.
 2. Sustituir datos iniciales a cero por polling o SSE.
-3. Añadir endpoint de snapshot/MJPEG para cámara.
+3. Conectar el snapshot con una herramienta visual para marcar ROIs.
 4. Pintar overlays reales de mesas/personas sobre la cámara.
 5. Añadir filtros funcionales de salón, zona y rango horario.
+
+## Snapshot de calibraci?n
+
+Para congelar la vista real de la c?mara y marcar despu?s la ROI de mesa, entrada o cola, el backend expone:
+
+```text
+POST /api/v1/demo/camera-snapshot
+```
+
+Ejemplo local:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/v1/demo/camera-snapshot?source=0"
+```
+
+El archivo se guarda en:
+
+```text
+data/calibration/snapshots/
+```
+
+La carpeta est? excluida de Git para no versionar im?genes reales. Solo se mantiene `.gitkeep`.
 
 ## Riesgos
 

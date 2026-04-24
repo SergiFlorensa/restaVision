@@ -11,6 +11,54 @@ class HealthResponse(BaseModel):
     now: datetime
 
 
+class DemoPersonDetectionStatusResponse(BaseModel):
+    enabled: bool
+    stream_url: str
+    camera_source: str
+    detector: str
+    privacy_note: str
+
+
+class CameraSnapshotResponse(BaseModel):
+    saved: bool
+    snapshot_path: str
+    camera_source: str
+    width: int
+    height: int
+    captured_at: datetime
+    usage_note: str
+
+
+class YoloPersonDetectionStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    available: bool
+    stream_url: str
+    camera_source: str
+    model_path: str
+    detector: str
+    confidence_threshold: float
+    iou_threshold: float
+    inference_stride: int
+    privacy_note: str
+
+
+class YoloRestaurantDetectionStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    available: bool
+    stream_url: str
+    camera_source: str
+    model_path: str
+    detector: str
+    confidence_threshold: float
+    iou_threshold: float
+    inference_stride: int
+    allowed_labels: list[str]
+    usage_note: str
+    privacy_note: str
+
+
 class CameraResponse(BaseModel):
     camera_id: str
     name: str

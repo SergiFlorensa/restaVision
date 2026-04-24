@@ -7,6 +7,7 @@ matplotlib
 torch
 torchvision
 onnxruntime
+ultralytics
 
 # Activar cuando el hardware y el pipeline lo requieran
 # openvino

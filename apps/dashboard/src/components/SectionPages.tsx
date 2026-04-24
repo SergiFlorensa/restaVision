@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-import { dashboardConfig } from "../config";
+import { dashboardConfig, resolveCameraStreamUrl } from "../config";
 import { metrics, tables } from "../data/dashboard";
 import type { DrawerKind, SectionId, TableMapItem } from "../types";
 import { CameraPanel } from "./CameraPanel";
@@ -30,7 +30,7 @@ export function OverviewSection({ onOpenDrawer, onTableSelect }: Omit<SectionPag
       <div className="camera-area">
         <CameraPanel
           onOpenSettings={() => onOpenDrawer("camera")}
-          streamUrl={dashboardConfig.cameraStreamUrl}
+          streamUrl={resolveCameraStreamUrl()}
         />
       </div>
 
@@ -88,7 +88,7 @@ export function SectionPages({ activeSection, onOpenDrawer, onTableSelect }: Sec
       <section className="section-page fade-in">
         <CameraPanel
           onOpenSettings={() => onOpenDrawer("camera")}
-          streamUrl={dashboardConfig.cameraStreamUrl}
+          streamUrl={resolveCameraStreamUrl()}
         />
         <OperationalPanel
           icon={Camera}

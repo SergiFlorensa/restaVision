@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import platform
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
+from time import sleep
+from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from services.alerts.anomaly import OperationalAlert
 from services.events.models import (
     CameraStatus,
@@ -17,11 +23,25 @@ from services.events.models import (
 from services.events.persistence import SqlAlchemyMVPRepository
 from services.events.service import RestaurantMVPService
 from services.events.settings import PersistenceSettings
+from services.vision.person_demo import DemoPersonDetectionConfig, OpenCVPersonDemoDetector
+from services.vision.realtime import FrameSkippingConfig, FrameSkippingPolicy
+from services.vision.yolo_detector import (
+    YOLO_PERSON_LABELS,
+    YOLO_RESTAURANT_LABELS,
+    UltralyticsYoloDetector,
+    YoloDetectorConfig,
+    draw_detection_summary,
+    draw_yolo_detections,
+    encode_jpeg,
+    is_ultralytics_available,
+)
 
 from apps.api.schemas import (
     AlertResponse,
     CameraResponse,
+    CameraSnapshotResponse,
     CameraUpsertRequest,
+    DemoPersonDetectionStatusResponse,
     EventResponse,
     HealthResponse,
     MarkReadyRequest,
@@ -31,6 +51,8 @@ from apps.api.schemas import (
     SessionResponse,
     TableResponse,
     TableUpsertRequest,
+    YoloPersonDetectionStatusResponse,
+    YoloRestaurantDetectionStatusResponse,
     ZoneResponse,
     ZoneUpsertRequest,
 )
@@ -58,6 +80,206 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             status="ok",
             environment="local",
             now=datetime.now(UTC),
+        )
+
+    @app.get(
+        "/api/v1/demo/person-detection/status",
+        response_model=DemoPersonDetectionStatusResponse,
+        tags=["vision-demo"],
+    )
+    def person_detection_status(
+        source: int | str = Query(default=0),
+    ) -> DemoPersonDetectionStatusResponse:
+        return DemoPersonDetectionStatusResponse(
+            enabled=True,
+            stream_url=f"/api/v1/demo/person-detection/stream?source={source}",
+            camera_source=str(source),
+            detector="OpenCV Haar face cascade + HOG person fallback",
+            privacy_note="Detecta presencia humana para demo local; no identifica personas.",
+        )
+
+    @app.get("/api/v1/demo/person-detection/stream", tags=["vision-demo"])
+    def person_detection_stream(
+        source: int | str = Query(default=0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+    ) -> StreamingResponse:
+        config = DemoPersonDetectionConfig(source=source, width=width, height=height)
+        return StreamingResponse(
+            _iter_person_detection_mjpeg(config),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    @app.post(
+        "/api/v1/demo/camera-snapshot",
+        response_model=CameraSnapshotResponse,
+        tags=["vision-demo"],
+    )
+    def create_camera_snapshot(
+        source: int | str = Query(default=0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        output_dir: str = Query(default="data/calibration/snapshots"),
+    ) -> CameraSnapshotResponse:
+        captured_at = datetime.now(UTC)
+        normalized_source = _normalize_video_source(source)
+        try:
+            snapshot = _capture_camera_snapshot(
+                source=normalized_source,
+                width=width,
+                height=height,
+                output_dir=Path(output_dir),
+                captured_at=captured_at,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+
+        return CameraSnapshotResponse(
+            saved=True,
+            snapshot_path=str(snapshot.path),
+            camera_source=str(normalized_source),
+            width=snapshot.width,
+            height=snapshot.height,
+            captured_at=captured_at,
+            usage_note=(
+                "Snapshot local para marcar ROI de mesa/zona. No versionar imágenes reales."
+            ),
+        )
+
+    @app.get(
+        "/api/v1/demo/yolo-person/status",
+        response_model=YoloPersonDetectionStatusResponse,
+        tags=["vision-demo"],
+    )
+    def yolo_person_detection_status(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+    ) -> YoloPersonDetectionStatusResponse:
+        return YoloPersonDetectionStatusResponse(
+            available=is_ultralytics_available(),
+            stream_url=(
+                "/api/v1/demo/yolo-person/stream"
+                f"?source={source}&model={model}&confidence={confidence}&iou={iou}"
+                f"&inference_stride={inference_stride}"
+            ),
+            camera_source=str(source),
+            model_path=model,
+            detector="Ultralytics YOLO filtered to class 'person'",
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            inference_stride=inference_stride,
+            privacy_note="Detecta personas para demo local; no identifica rostros ni nombres.",
+        )
+
+    @app.get(
+        "/api/v1/demo/yolo-restaurant/status",
+        response_model=YoloRestaurantDetectionStatusResponse,
+        tags=["vision-demo"],
+    )
+    def yolo_restaurant_detection_status(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.25, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+        labels: str | None = Query(default=None),
+    ) -> YoloRestaurantDetectionStatusResponse:
+        allowed_labels = _parse_yolo_labels(labels, YOLO_RESTAURANT_LABELS)
+        return YoloRestaurantDetectionStatusResponse(
+            available=is_ultralytics_available(),
+            stream_url=(
+                "/api/v1/demo/yolo-restaurant/stream"
+                f"?source={source}&model={model}&confidence={confidence}&iou={iou}"
+                f"&inference_stride={inference_stride}"
+            ),
+            camera_source=str(source),
+            model_path=model,
+            detector="Ultralytics YOLO filtered to restaurant-relevant COCO classes",
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            inference_stride=inference_stride,
+            allowed_labels=list(allowed_labels),
+            usage_note=(
+                "Modo de exploracion: sirve para probar mesa/sillas/objetos con COCO. "
+                "La ocupacion real debe decidirse despues con ROI y reglas temporales."
+            ),
+            privacy_note=(
+                "Detecta objetos/personas para demo local; no identifica rostros ni nombres."
+            ),
+        )
+
+    @app.get("/api/v1/demo/yolo-person/stream", tags=["vision-demo"])
+    def yolo_person_detection_stream(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        image_size: int = Query(default=320, ge=160, le=1280),
+        max_detections: int = Query(default=20, ge=1, le=100),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+    ) -> StreamingResponse:
+        config = YoloDetectorConfig(
+            model_path=model,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            image_size=image_size,
+            max_detections=max_detections,
+            allowed_labels=YOLO_PERSON_LABELS,
+        )
+        return StreamingResponse(
+            _iter_yolo_detection_mjpeg(
+                source=source,
+                width=width,
+                height=height,
+                detector_config=config,
+                summary_title=None,
+                inference_stride=inference_stride,
+            ),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
+    @app.get("/api/v1/demo/yolo-restaurant/stream", tags=["vision-demo"])
+    def yolo_restaurant_detection_stream(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.25, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        labels: str | None = Query(default=None),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        image_size: int = Query(default=320, ge=160, le=1280),
+        max_detections: int = Query(default=30, ge=1, le=100),
+        min_box_area_ratio: float = Query(default=0.0005, ge=0.0, le=1.0),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+    ) -> StreamingResponse:
+        allowed_labels = _parse_yolo_labels(labels, YOLO_RESTAURANT_LABELS)
+        config = YoloDetectorConfig(
+            model_path=model,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            image_size=image_size,
+            max_detections=max_detections,
+            min_box_area_ratio=min_box_area_ratio,
+            allowed_labels=allowed_labels,
+        )
+        return StreamingResponse(
+            _iter_yolo_detection_mjpeg(
+                source=source,
+                width=width,
+                height=height,
+                detector_config=config,
+                summary_title="YOLO restaurante",
+                inference_stride=inference_stride,
+            ),
+            media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
     @app.get("/api/v1/cameras", response_model=list[CameraResponse], tags=["catalog"])
@@ -295,6 +517,182 @@ def serialize_alert(alert: OperationalAlert) -> AlertResponse:
         score=alert.score,
         evidence_json=alert.evidence_json,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CameraSnapshot:
+    path: Path
+    width: int
+    height: int
+
+
+def _iter_person_detection_mjpeg(config: DemoPersonDetectionConfig) -> Any:
+    cv2 = _load_cv2_for_demo_stream()
+    detector = OpenCVPersonDemoDetector(config)
+    capture = _open_video_capture(cv2, config.source)
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.height)
+    if not capture.isOpened():
+        capture.release()
+        raise RuntimeError(f"Could not open video source: {config.source!r}")
+
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                sleep(0.05)
+                continue
+
+            detections = detector.detect(frame)
+            annotated = detector.draw(frame, detections)
+            frame_bytes = detector.encode_jpeg(annotated)
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Cache-Control: no-store\r\n\r\n" + frame_bytes + b"\r\n"
+            )
+    finally:
+        capture.release()
+
+
+def _capture_camera_snapshot(
+    source: int | str,
+    width: int,
+    height: int,
+    output_dir: Path,
+    captured_at: datetime,
+) -> CameraSnapshot:
+    cv2 = _load_cv2_for_demo_stream()
+    capture = _open_video_capture(cv2, source)
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not capture.isOpened():
+        capture.release()
+        raise RuntimeError(f"Could not open video source: {source!r}")
+
+    try:
+        ok, frame = capture.read()
+        if not ok or frame is None:
+            raise RuntimeError(f"Could not read frame from video source: {source!r}")
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = _build_snapshot_path(output_dir, source, captured_at)
+        if not cv2.imwrite(str(path), frame):
+            raise RuntimeError(f"Could not write snapshot to: {path}")
+        return CameraSnapshot(
+            path=path,
+            width=int(frame.shape[1]),
+            height=int(frame.shape[0]),
+        )
+    finally:
+        capture.release()
+
+
+def _iter_yolo_detection_mjpeg(
+    source: int | str,
+    width: int,
+    height: int,
+    detector_config: YoloDetectorConfig,
+    summary_title: str | None,
+    inference_stride: int,
+) -> Any:
+    cv2 = _load_cv2_for_demo_stream()
+    detector: UltralyticsYoloDetector | None = None
+    frame_index = 0
+    last_detections = []
+    policy = FrameSkippingPolicy(
+        FrameSkippingConfig(base_interval=inference_stride, hot_interval=inference_stride)
+    )
+    capture = _open_video_capture(cv2, source)
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not capture.isOpened():
+        capture.release()
+        raise RuntimeError(f"Could not open video source: {source!r}")
+
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                sleep(0.05)
+                continue
+
+            if detector is None:
+                warmup_frame = frame.copy()
+                cv2.putText(
+                    warmup_frame,
+                    "Inicializando YOLO...",
+                    (20, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.85,
+                    (245, 245, 245),
+                    2,
+                    cv2.LINE_AA,
+                )
+                yield _mjpeg_frame(encode_jpeg(warmup_frame))
+                detector = UltralyticsYoloDetector(detector_config)
+
+            if policy.should_process(frame_index):
+                last_detections = detector.detect(frame)
+            frame_index += 1
+
+            annotated = draw_yolo_detections(frame, last_detections)
+            if summary_title:
+                annotated = draw_detection_summary(annotated, last_detections, summary_title)
+            frame_bytes = encode_jpeg(annotated)
+            yield _mjpeg_frame(frame_bytes)
+    finally:
+        capture.release()
+
+
+def _open_video_capture(cv2: Any, source: int | str) -> Any:
+    source = _normalize_video_source(source)
+    if platform.system() == "Windows" and isinstance(source, int):
+        return cv2.VideoCapture(source, cv2.CAP_DSHOW)
+    return cv2.VideoCapture(source)
+
+
+def _normalize_video_source(source: int | str) -> int | str:
+    if isinstance(source, str) and source.isdigit():
+        return int(source)
+    return source
+
+
+def _parse_yolo_labels(labels: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
+    if labels is None:
+        return default
+    parsed = tuple(label.strip() for label in labels.split(",") if label.strip())
+    return parsed or default
+
+
+def _build_snapshot_path(output_dir: Path, source: int | str, captured_at: datetime) -> Path:
+    timestamp = captured_at.strftime("%Y%m%d_%H%M%S")
+    source_slug = _safe_source_slug(source)
+    return output_dir / f"snapshot_{source_slug}_{timestamp}.jpg"
+
+
+def _safe_source_slug(source: int | str) -> str:
+    raw = str(source)
+    sanitized = "".join(character if character.isalnum() else "_" for character in raw)
+    return sanitized.strip("_") or "camera"
+
+
+def _mjpeg_frame(frame_bytes: bytes) -> bytes:
+    return (
+        b"--frame\r\n"
+        b"Content-Type: image/jpeg\r\n"
+        b"Cache-Control: no-store\r\n\r\n" + frame_bytes + b"\r\n"
+    )
+
+
+def _load_cv2_for_demo_stream() -> Any:
+    try:
+        import cv2
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(
+            "OpenCV is required for the webcam demo stream. Install requirements/ml.txt."
+        ) from exc
+    return cv2
 
 
 app = create_app()

@@ -29,6 +29,7 @@ Puede aportar ventajas claras de rendimiento/watt en edge, pero hay que revisar 
 ### Ultralytics YOLO
 Muy útil, pero con AGPL-3.0 para su edición open source.  
 Si el proyecto se comercializa de forma cerrada, hay que revisar cuidadosamente esa implicación.  
+En el MVP se usa como dependencia de visión opcional para demos locales y detección de personas; no debe ocultarse esta restricción en una futura venta.  
 - licencia: https://www.ultralytics.com/license
 - docs: https://docs.ultralytics.com/
 

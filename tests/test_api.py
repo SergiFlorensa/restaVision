@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from apps.api.main import create_app
+import apps.api.main as api_main
+from apps.api.main import CameraSnapshot, create_app
 from fastapi.testclient import TestClient
 from services.alerts.anomaly import DurationAnomalyConfig, OperationalAnomalyDetector
 from services.events.models import TableSession
@@ -24,6 +26,101 @@ def test_health_and_catalog_endpoints() -> None:
     assert tables.status_code == 200
     assert len(tables.json()) == 1
     assert tables.json()[0]["state"] == "ready"
+
+
+def test_demo_person_detection_status_endpoint_exposes_stream_url() -> None:
+    client = make_client()
+
+    response = client.get("/api/v1/demo/person-detection/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["enabled"] is True
+    assert payload["stream_url"].startswith("/api/v1/demo/person-detection/stream")
+    assert "no identifica" in payload["privacy_note"]
+
+
+def test_camera_snapshot_endpoint_returns_saved_reference_path(monkeypatch) -> None:
+    client = make_client()
+
+    def fake_capture_camera_snapshot(
+        source,
+        width,
+        height,
+        output_dir,
+        captured_at,
+    ) -> CameraSnapshot:
+        assert source == 0
+        assert width == 640
+        assert height == 480
+        assert output_dir == Path("data/calibration/snapshots")
+        return CameraSnapshot(
+            path=output_dir / "snapshot_0_20260424_120000.jpg",
+            width=640,
+            height=480,
+        )
+
+    monkeypatch.setattr(api_main, "_capture_camera_snapshot", fake_capture_camera_snapshot)
+
+    response = client.post("/api/v1/demo/camera-snapshot?source=0")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["saved"] is True
+    assert payload["camera_source"] == "0"
+    assert payload["width"] == 640
+    assert payload["height"] == 480
+    assert payload["snapshot_path"].endswith("snapshot_0_20260424_120000.jpg")
+    assert "ROI" in payload["usage_note"]
+
+
+def test_camera_snapshot_endpoint_reports_camera_errors(monkeypatch) -> None:
+    client = make_client()
+
+    def fake_capture_camera_snapshot(*args, **kwargs) -> CameraSnapshot:
+        raise RuntimeError("Could not open video source: 99")
+
+    monkeypatch.setattr(api_main, "_capture_camera_snapshot", fake_capture_camera_snapshot)
+
+    response = client.post("/api/v1/demo/camera-snapshot?source=99")
+
+    assert response.status_code == 503
+    assert "Could not open video source" in response.json()["detail"]
+
+
+def test_yolo_person_detection_status_endpoint_exposes_optional_detector() -> None:
+    client = make_client()
+
+    response = client.get(
+        "/api/v1/demo/yolo-person/status?confidence=0.4&iou=0.6&inference_stride=4"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "available" in payload
+    assert payload["stream_url"].startswith("/api/v1/demo/yolo-person/stream")
+    assert payload["confidence_threshold"] == 0.4
+    assert payload["iou_threshold"] == 0.6
+    assert payload["inference_stride"] == 4
+    assert "inference_stride=4" in payload["stream_url"]
+    assert "no identifica" in payload["privacy_note"]
+
+
+def test_yolo_restaurant_detection_status_endpoint_exposes_coco_demo_classes() -> None:
+    client = make_client()
+
+    response = client.get("/api/v1/demo/yolo-restaurant/status?confidence=0.3&inference_stride=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream_url"].startswith("/api/v1/demo/yolo-restaurant/stream")
+    assert payload["confidence_threshold"] == 0.3
+    assert payload["inference_stride"] == 5
+    assert "inference_stride=5" in payload["stream_url"]
+    assert "person" in payload["allowed_labels"]
+    assert "chair" in payload["allowed_labels"]
+    assert "dining table" in payload["allowed_labels"]
+    assert "ROI" in payload["usage_note"]
 
 
 def test_catalog_configuration_endpoints_create_operational_topology() -> None:
