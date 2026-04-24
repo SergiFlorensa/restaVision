@@ -39,6 +39,7 @@ desktop.ini
 node_modules/
 .pnpm-store/
 .npm/
+*.tsbuildinfo
 .ipynb_checkpoints/
 
 # Secretos y claves

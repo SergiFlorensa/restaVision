@@ -74,6 +74,7 @@ repo_root/
       20_mml_matematicas_aplicadas_anomalias.md
       21_modelos_probabilisticos_y_viterbi.md
       22_preprocesado_integral_haar.md
+      23_dashboard_operativo_web.md
     05_hardware_y_costes/
       01_hardware_minimo_mvp.md
       02_hardware_recomendado_por_fases.md

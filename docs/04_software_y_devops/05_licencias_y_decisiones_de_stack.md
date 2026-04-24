@@ -10,8 +10,16 @@ Mantener el proyecto lo más open source y reutilizable posible.
 - FastAPI — https://fastapi.tiangolo.com/
 - PostgreSQL — https://www.postgresql.org/docs/
 - Grafana OSS — https://grafana.com/oss/
+- React — MIT — https://react.dev/
+- Vite — MIT — https://vite.dev/
+- TypeScript — Apache-2.0 — https://www.typescriptlang.org/
+- lucide-react — ISC — https://lucide.dev/
 - Vosk — Apache-2.0 — https://github.com/alphacep/vosk-api
 - whisper.cpp — MIT — https://github.com/ggml-org/whisper.cpp
+
+## Decisión de frontend operativo
+Para el dashboard local se adopta Vite + React + TypeScript con CSS propio y `lucide-react`.
+La primera versión evita librerías pesadas de gráficas y renderiza la curva de cola con SVG nativo para reducir bundle y mantener fluidez en portátil básico.
 
 ## Herramientas a vigilar
 
