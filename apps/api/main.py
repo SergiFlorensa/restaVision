@@ -25,6 +25,11 @@ from services.events.service import RestaurantMVPService
 from services.events.settings import PersistenceSettings
 from services.vision.person_demo import DemoPersonDetectionConfig, OpenCVPersonDemoDetector
 from services.vision.realtime import FrameSkippingConfig, FrameSkippingPolicy
+from services.vision.table_service_monitor import (
+    SERVICE_RELEVANT_LABELS,
+    TableServiceMonitor,
+    TableServiceMonitorConfig,
+)
 from services.vision.yolo_detector import (
     YOLO_PERSON_LABELS,
     YOLO_RESTAURANT_LABELS,
@@ -48,8 +53,12 @@ from apps.api.schemas import (
     ObservationRequest,
     ObservationResponse,
     PredictionResponse,
+    ServiceAlertResponse,
+    ServiceTimelineEventResponse,
     SessionResponse,
     TableResponse,
+    TableServiceAnalysisResponse,
+    TableServiceMonitorStatusResponse,
     TableUpsertRequest,
     YoloPersonDetectionStatusResponse,
     YoloRestaurantDetectionStatusResponse,
@@ -282,6 +291,72 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
+    @app.get(
+        "/api/v1/demo/table-service/status",
+        response_model=TableServiceMonitorStatusResponse,
+        tags=["vision-demo"],
+    )
+    def table_service_monitor_status(
+        source: int | str = Query(default=0),
+        table_id: str = Query(default="table_01"),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.25, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+    ) -> TableServiceMonitorStatusResponse:
+        return TableServiceMonitorStatusResponse(
+            available=is_ultralytics_available(),
+            stream_url=(
+                "/api/v1/demo/table-service/stream"
+                f"?source={source}&table_id={table_id}&model={model}"
+                f"&confidence={confidence}&iou={iou}&inference_stride={inference_stride}"
+            ),
+            camera_source=str(source),
+            table_id=table_id,
+            detector="Ultralytics YOLO con análisis de servicio de mesa",
+            inference_stride=inference_stride,
+            privacy_note=(
+                "Detecta cubiertos, platos, comida, personas y gestos de atención. "
+                "No identifica rostros ni nombres. Análisis local de servicio."
+            ),
+        )
+
+    @app.get(
+        "/api/v1/demo/table-service/stream",
+        tags=["vision-demo"],
+    )
+    def table_service_detection_stream(
+        source: int | str = Query(default=0),
+        table_id: str = Query(default="table_01"),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.25, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        image_size: int = Query(default=320, ge=160, le=1280),
+        max_detections: int = Query(default=30, ge=1, le=100),
+        inference_stride: int = Query(default=3, ge=1, le=30),
+    ) -> StreamingResponse:
+        config = YoloDetectorConfig(
+            model_path=model,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            image_size=image_size,
+            max_detections=max_detections,
+            allowed_labels=SERVICE_RELEVANT_LABELS,
+        )
+        return StreamingResponse(
+            _iter_table_service_analysis_mjpeg(
+                source=source,
+                table_id=table_id,
+                width=width,
+                height=height,
+                detector_config=config,
+                inference_stride=inference_stride,
+            ),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
     @app.get("/api/v1/cameras", response_model=list[CameraResponse], tags=["catalog"])
     def list_cameras(request: Request) -> list[CameraResponse]:
         service = get_service(request)
@@ -423,6 +498,92 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         return serialize_table(snapshot)
+
+    @app.post(
+        "/api/v1/demo/table-service/analyze",
+        response_model=TableServiceAnalysisResponse,
+        tags=["vision-demo"],
+    )
+    def analyze_table_service_snapshot(
+        source: int | str = Query(default=0),
+        table_id: str = Query(default="table_01"),
+        model: str = Query(default="yolo11n.pt"),
+        confidence: float = Query(default=0.25, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        image_size: int = Query(default=320, ge=160, le=1280),
+        max_detections: int = Query(default=30, ge=1, le=100),
+    ) -> TableServiceAnalysisResponse:
+        """Captura un frame y devuelve el análisis actual de servicio de mesa."""
+        cv2 = _load_cv2_for_demo_stream()
+        config = YoloDetectorConfig(
+            model_path=model,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            image_size=image_size,
+            max_detections=max_detections,
+            allowed_labels=SERVICE_RELEVANT_LABELS,
+        )
+        detector = UltralyticsYoloDetector(config)
+        monitor = TableServiceMonitor(TableServiceMonitorConfig(table_id=table_id))
+
+        normalized_source = _normalize_video_source(source)
+        capture = _open_video_capture(cv2, normalized_source)
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+        try:
+            if not capture.isOpened():
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Could not open video source: {source!r}",
+                )
+
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=f"Could not read frame from video source: {source!r}",
+                )
+
+            detections = detector.detect(frame)
+            analysis = monitor.process(detections)
+
+            return TableServiceAnalysisResponse(
+                table_id=analysis.table_id,
+                updated_at=analysis.updated_at,
+                state=analysis.state,
+                people_count=analysis.people_count,
+                object_counts=analysis.object_counts,
+                missing_items=analysis.missing_items,
+                service_flags=analysis.service_flags,
+                active_alerts=[
+                    ServiceAlertResponse(
+                        alert_id=alert.alert_id,
+                        ts=alert.ts,
+                        alert_type=alert.alert_type,
+                        severity=alert.severity,
+                        message=alert.message,
+                        evidence=alert.evidence,
+                    )
+                    for alert in analysis.active_alerts
+                ],
+                timeline_events=[
+                    ServiceTimelineEventResponse(
+                        event_id=event.event_id,
+                        ts=event.ts,
+                        event_type=event.event_type,
+                        message=event.message,
+                        payload=event.payload,
+                    )
+                    for event in analysis.timeline_events
+                ],
+                seat_duration_seconds=analysis.seat_duration_seconds,
+                away_duration_seconds=analysis.away_duration_seconds,
+            )
+        finally:
+            capture.release()
 
     return app
 
@@ -643,6 +804,115 @@ def _iter_yolo_detection_mjpeg(
             yield _mjpeg_frame(frame_bytes)
     finally:
         capture.release()
+
+
+def _iter_table_service_analysis_mjpeg(
+    source: int | str,
+    table_id: str,
+    width: int,
+    height: int,
+    detector_config: YoloDetectorConfig,
+    inference_stride: int,
+) -> Any:
+    cv2 = _load_cv2_for_demo_stream()
+    detector: UltralyticsYoloDetector | None = None
+    monitor = TableServiceMonitor(TableServiceMonitorConfig(table_id=table_id))
+    frame_index = 0
+    last_detections = []
+    policy = FrameSkippingPolicy(
+        FrameSkippingConfig(base_interval=inference_stride, hot_interval=inference_stride)
+    )
+    capture = _open_video_capture(cv2, source)
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not capture.isOpened():
+        capture.release()
+        raise RuntimeError(f"Could not open video source: {source!r}")
+
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok or frame is None:
+                sleep(0.05)
+                continue
+
+            if detector is None:
+                warmup_frame = frame.copy()
+                cv2.putText(
+                    warmup_frame,
+                    f"Inicializando análisis de mesa {table_id}...",
+                    (20, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (245, 245, 245),
+                    2,
+                    cv2.LINE_AA,
+                )
+                yield _mjpeg_frame(encode_jpeg(warmup_frame))
+                detector = UltralyticsYoloDetector(detector_config)
+
+            if policy.should_process(frame_index):
+                last_detections = detector.detect(frame)
+
+            analysis = monitor.process(last_detections)
+            frame_index += 1
+
+            annotated = draw_yolo_detections(frame, last_detections)
+            annotated = _draw_table_service_analysis(annotated, analysis, cv2)
+            frame_bytes = encode_jpeg(annotated)
+            yield _mjpeg_frame(frame_bytes)
+    finally:
+        capture.release()
+
+
+def _draw_table_service_analysis(frame: Any, analysis: Any, cv2: Any) -> Any:
+    """Dibuja el análisis de servicio sobre el frame."""
+    import cv2 as cv2_lib
+
+    height, width = frame.shape[:2]
+    y_offset = 25
+    line_height = 22
+    font = cv2_lib.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    thickness = 1
+    text_color = (0, 255, 0)
+    alert_color = (0, 0, 255)
+
+    lines = [
+        f"Mesa: {analysis.table_id}",
+        f"Estado: {analysis.state}",
+        f"Personas: {analysis.people_count}",
+        f"Tiempo sentado: {analysis.seat_duration_seconds or 0}s",
+    ]
+
+    if analysis.missing_items:
+        missing_str = ", ".join([f"{k}:{v}" for k, v in analysis.missing_items.items()])
+        lines.append(f"Falta: {missing_str}")
+
+    if analysis.active_alerts:
+        lines.append(f"⚠️ ALERTAS: {len(analysis.active_alerts)}")
+        for alert in analysis.active_alerts:
+            lines.append(f"  - {alert.message}")
+
+    if analysis.timeline_events:
+        latest_event = analysis.timeline_events[0]
+        lines.append(f"Último evento: {latest_event.message}")
+
+    for i, line in enumerate(lines):
+        y = y_offset + (i * line_height)
+        color = alert_color if "⚠️" in line or "Falta:" in line else text_color
+        cv2_lib.putText(
+            frame,
+            line,
+            (10, y),
+            font,
+            font_scale,
+            color,
+            thickness,
+            cv2_lib.LINE_AA,
+        )
+
+    return frame
 
 
 def _open_video_capture(cv2: Any, source: int | str) -> Any:

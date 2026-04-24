@@ -59,6 +59,49 @@ class YoloRestaurantDetectionStatusResponse(BaseModel):
     privacy_note: str
 
 
+class ServiceAlertResponse(BaseModel):
+    alert_id: str
+    ts: datetime
+    alert_type: str
+    severity: str
+    message: str
+    evidence: dict
+
+
+class ServiceTimelineEventResponse(BaseModel):
+    event_id: str
+    ts: datetime
+    event_type: str
+    message: str
+    payload: dict
+
+
+class TableServiceAnalysisResponse(BaseModel):
+    table_id: str
+    updated_at: datetime
+    state: str
+    people_count: int
+    object_counts: dict
+    missing_items: dict
+    service_flags: dict
+    active_alerts: list[ServiceAlertResponse]
+    timeline_events: list[ServiceTimelineEventResponse]
+    seat_duration_seconds: int | None
+    away_duration_seconds: int | None
+
+
+class TableServiceMonitorStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    available: bool
+    stream_url: str
+    camera_source: str
+    table_id: str
+    detector: str
+    inference_stride: int
+    privacy_note: str
+
+
 class CameraResponse(BaseModel):
     camera_id: str
     name: str
