@@ -1,20 +1,34 @@
-import { Maximize2, MoreVertical, PlugZap, UsersRound, Video, VolumeX } from "lucide-react";
-import { useRef, useState } from "react";
+﻿import { Maximize2, Minimize2, MoreVertical, PlugZap, Video, VolumeX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { cameraMarkers } from "../data/dashboard";
+import type { TableServiceAnalysis } from "../types";
 
 interface CameraPanelProps {
   streamUrl?: string;
   onOpenSettings: () => void;
+  serviceAnalysis?: TableServiceAnalysis | null;
 }
 
 export function CameraPanel({ streamUrl, onOpenSettings }: CameraPanelProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [cameraStatus, setCameraStatus] = useState("Esperando cámara");
   const [localCameraConnected, setLocalCameraConnected] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const hasStream = Boolean(streamUrl);
   const hasMarkers = cameraMarkers.length > 0;
   const showEmptyState = !hasStream && !localCameraConnected;
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setExpanded(false);
+      }
+    }
+
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
 
   async function startLocalCamera() {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -38,8 +52,15 @@ export function CameraPanel({ streamUrl, onOpenSettings }: CameraPanelProps) {
     }
   }
 
+  function toggleExpanded() {
+    setExpanded((current) => !current);
+  }
+
   return (
-    <section className="panel camera-panel" aria-label="Cámara principal del salón">
+    <section
+      aria-label="Cámara principal del salón"
+      className={expanded ? "panel camera-panel expanded" : "panel camera-panel"}
+    >
       <div className="camera-scene">
         {hasStream ? (
           <img alt="Stream de cámara principal" className="camera-stream" src={streamUrl} />
@@ -99,29 +120,16 @@ export function CameraPanel({ streamUrl, onOpenSettings }: CameraPanelProps) {
           : null}
 
         {!showEmptyState ? (
-          <div className="camera-summary">
-            <div>
-              <UsersRound size={30} />
-              <span>Personas en sala</span>
-              <strong>0</strong>
-              <small>Ahora</small>
-            </div>
-            <div className="vertical-separator" />
-            <div>
-              <span>Pico hoy</span>
-              <strong>0</strong>
-              <small>Sin datos</small>
-            </div>
-          </div>
-        ) : null}
-
-        {!showEmptyState ? (
           <div className="camera-controls">
             <button aria-label="Silenciar cámara" type="button">
               <VolumeX size={22} />
             </button>
-            <button aria-label="Pantalla completa" type="button">
-              <Maximize2 size={22} />
+            <button
+              aria-label={expanded ? "Reducir cámara" : "Ampliar cámara"}
+              onClick={toggleExpanded}
+              type="button"
+            >
+              {expanded ? <Minimize2 size={22} /> : <Maximize2 size={22} />}
             </button>
             <button aria-label="Más opciones" onClick={onOpenSettings} type="button">
               <MoreVertical size={22} />

@@ -7,7 +7,6 @@ from typing import Any
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-
 from services.vision.table_service_monitor import SERVICE_RELEVANT_LABELS, TableServiceMonitor
 from services.vision.yolo_detector import (
     UltralyticsYoloDetector,
@@ -97,7 +96,9 @@ class DemoTableEventRegistry:
             "table_id": table_id,
             "session_id": table_ref["session_id"],
             "customer_group_id": table_ref["customer_group_id"],
-            "relation_key": f"{table_id}::{table_ref['session_id']}::{table_ref['customer_group_id']}",
+            "relation_key": (
+                f"{table_id}::{table_ref['session_id']}::{table_ref['customer_group_id']}"
+            ),
             "payload": {
                 **payload,
                 "table_id": table_id,
@@ -160,8 +161,13 @@ def table_service_status(
         "image_size": image_size,
         "inference_stride": inference_stride,
         "allowed_labels": list(SERVICE_RELEVANT_LABELS),
-        "privacy_note": "Demo sin reconocimiento facial: solo objetos, personas anónimas y eventos de mesa.",
-        "usage_note": "Para plato/mano levantada hace falta modelo personalizado si YOLO base no trae esas clases.",
+        "privacy_note": (
+            "Demo sin reconocimiento facial: solo objetos, personas anónimas y eventos de mesa."
+        ),
+        "usage_note": (
+            "Para plato/mano levantada hace falta modelo personalizado "
+            "si YOLO base no trae esas clases."
+        ),
     }
 
 
@@ -334,7 +340,13 @@ def _draw_panel(
     return output
 
 
-def _wrap_text(text: str, max_width: int, font: Any, font_scale: float, thickness: int) -> list[str]:
+def _wrap_text(
+    text: str,
+    max_width: int,
+    font: Any,
+    font_scale: float,
+    thickness: int,
+) -> list[str]:
     cv2 = _load_cv2()
     words = str(text).split()
     if not words:
@@ -413,5 +425,7 @@ def _load_cv2() -> Any:
     try:
         import cv2
     except ModuleNotFoundError as exc:
-        raise RuntimeError("OpenCV es necesario para esta demo. Instala requirements/ml.txt.") from exc
+        raise RuntimeError(
+            "OpenCV es necesario para esta demo. Instala requirements/ml.txt."
+        ) from exc
     return cv2

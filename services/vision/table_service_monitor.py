@@ -160,9 +160,10 @@ class TableServiceMonitor:
         self,
         detections: list[ScoredDetection],
         observed_at: datetime | None = None,
+        stable_counts: dict[str, int] | None = None,
     ) -> TableServiceAnalysis:
         ts = observed_at or datetime.now(UTC)
-        counts = count_labels(detections)
+        counts = dict(sorted((stable_counts or count_labels(detections)).items()))
         people_count = counts.get("person", 0)
         plate_count = count_matching_labels(counts, PLATE_LABELS)
         food_count = count_matching_labels(counts, FOOD_LABELS)

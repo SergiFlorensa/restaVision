@@ -9,6 +9,8 @@ from fastapi.testclient import TestClient
 from services.alerts.anomaly import DurationAnomalyConfig, OperationalAnomalyDetector
 from services.events.models import TableSession
 from services.events.service import RestaurantMVPService
+from services.vision.geometry import BoundingBox, ScoredDetection
+from services.vision.table_service_monitor import TableServiceMonitor, TableServiceMonitorConfig
 
 
 def make_client() -> TestClient:
@@ -121,6 +123,44 @@ def test_yolo_restaurant_detection_status_endpoint_exposes_coco_demo_classes() -
     assert "chair" in payload["allowed_labels"]
     assert "dining table" in payload["allowed_labels"]
     assert "ROI" in payload["usage_note"]
+
+
+def test_table_service_analysis_endpoint_returns_waiting_state_before_stream() -> None:
+    client = make_client()
+
+    response = client.get("/api/v1/demo/table-service/analysis?table_id=table_01")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["table_id"] == "table_01"
+    assert payload["state"] == "waiting_for_video"
+    assert payload["people_count"] == 0
+
+
+def test_table_service_analysis_endpoint_exposes_latest_shared_stream_state() -> None:
+    client = make_client()
+    monitor = TableServiceMonitor(TableServiceMonitorConfig(table_id="table_42"))
+    analysis = monitor.process(
+        [
+            ScoredDetection("person_1", BoundingBox(0, 0, 100, 200), 0.92, "person"),
+            ScoredDetection("fork_1", BoundingBox(0, 0, 10, 20), 0.82, "fork"),
+        ],
+        observed_at=datetime(2026, 4, 24, 12, 0, tzinfo=UTC),
+    )
+    client.app.state.table_service_analyses["table_42"] = analysis
+
+    response = client.get("/api/v1/demo/table-service/analysis?table_id=table_42")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["table_id"] == "table_42"
+    assert payload["people_count"] == 1
+    assert payload["object_counts"]["person"] == 1
+    assert payload["object_counts"]["fork"] == 1
+    assert payload["missing_items"]["knife"] == 1
+    event_types = [event["event_type"] for event in payload["timeline_events"]]
+    assert "table_session_started" in event_types
+    assert "missing_table_setup" in event_types
 
 
 def test_catalog_configuration_endpoints_create_operational_topology() -> None:

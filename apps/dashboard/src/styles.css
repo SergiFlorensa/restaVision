@@ -356,6 +356,22 @@ button {
   overflow: hidden;
 }
 
+.camera-panel.expanded {
+  background: #090806;
+  border-radius: 0;
+  inset: 18px;
+  padding: 0;
+  position: fixed;
+  z-index: 80;
+}
+
+.camera-panel.expanded .camera-scene {
+  aspect-ratio: auto;
+  border-radius: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
 .camera-scene {
   aspect-ratio: 16 / 9;
   background:
@@ -587,6 +603,11 @@ button {
   z-index: 3;
 }
 
+.camera-panel.expanded .camera-controls {
+  bottom: 28px;
+  right: 28px;
+}
+
 .metric-card {
   min-height: 155px;
   padding: 20px 18px;
@@ -657,7 +678,8 @@ button {
 
 .queue-panel,
 .alerts-panel,
-.table-map-panel {
+.table-map-panel,
+.table-service-card {
   padding: 20px;
 }
 
@@ -672,6 +694,159 @@ button {
   font-family: Georgia, "Times New Roman", serif;
   font-size: 18px;
   margin: 0;
+}
+
+.table-service-card {
+  display: grid;
+  gap: 14px;
+}
+
+.table-service-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.status-pill {
+  background: #eee4d4;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 11px;
+}
+
+.status-pill.active {
+  background: rgb(66 109 54 / 12%);
+  color: var(--green);
+}
+
+.table-service-summary {
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.table-service-kpis {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.table-service-kpis div {
+  background: #fffaf2;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+}
+
+.table-service-kpis span,
+.check-card span,
+.service-message small,
+.table-service-footnote {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.table-service-kpis strong {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
+}
+
+.table-checklist {
+  display: grid;
+  gap: 9px;
+}
+
+.check-card {
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  display: flex;
+  gap: 10px;
+  padding: 11px;
+}
+
+.check-card svg {
+  margin-top: 2px;
+}
+
+.check-card.ok {
+  background: rgb(66 109 54 / 7%);
+}
+
+.check-card.ok svg {
+  color: var(--green);
+}
+
+.check-card.warning {
+  background: rgb(121 9 24 / 7%);
+}
+
+.check-card.warning svg {
+  color: var(--wine);
+}
+
+.check-card div {
+  display: grid;
+  gap: 3px;
+}
+
+.table-event-feed {
+  background: #fffaf2;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  gap: 9px;
+  max-height: 285px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.event-feed-title {
+  align-items: center;
+  color: var(--wine);
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.service-message {
+  align-items: flex-start;
+  background: #f7efe2;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 48px 1fr;
+  padding: 10px;
+}
+
+.service-message > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.service-message div {
+  display: grid;
+  gap: 3px;
+}
+
+.service-message.alert {
+  background: rgb(121 9 24 / 8%);
+  border-color: rgb(121 9 24 / 14%);
+}
+
+.service-message.muted {
+  opacity: 0.78;
+}
+
+.table-service-footnote {
+  display: block;
 }
 
 .queue-content {
