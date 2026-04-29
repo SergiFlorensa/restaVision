@@ -1,24 +1,38 @@
 import { Expand, Minus, Plus, UsersRound } from "lucide-react";
 
 import { tables } from "../data/dashboard";
-import type { TableMapItem, TableStatus } from "../types";
+import type { TableMapItem, TableServiceAnalysis, TableStatus } from "../types";
 
 export const statusLabels: Record<TableStatus, string> = {
   free: "Libre",
   occupied: "Ocupada",
+  finishing: "Finalizando",
+  dirty: "Mesa sucia",
+  cleaning: "Limpieza",
   releasing: "Por liberar",
   reserved: "Reservada",
   offline: "Fuera de servicio",
 };
 
-const legend: TableStatus[] = ["free", "occupied", "releasing", "reserved", "offline"];
+const legend: TableStatus[] = ["free", "occupied", "finishing", "dirty", "reserved", "offline"];
 
 interface TableMapProps {
   compact?: boolean;
   onTableSelect?: (table: TableMapItem) => void;
+  serviceAnalysis?: TableServiceAnalysis | null;
 }
 
-export function TableMap({ compact = false, onTableSelect }: TableMapProps) {
+export function TableMap({ compact = false, onTableSelect, serviceAnalysis }: TableMapProps) {
+  const liveTables = tables.map((table) => {
+    if (!serviceAnalysis || table.id !== tableNumberFromId(serviceAnalysis.table_id)) {
+      return table;
+    }
+    return {
+      ...table,
+      status: mapAnalysisStateToTableStatus(serviceAnalysis.state),
+    };
+  });
+
   return (
     <section className={compact ? "panel table-map-panel compact" : "panel table-map-panel"}>
       <header className="map-header">
@@ -41,7 +55,7 @@ export function TableMap({ compact = false, onTableSelect }: TableMapProps) {
         <div className="bar-zone" />
         <div className="entrance-zone" />
         <div className="floor-walkway" />
-        {tables.map((table) => (
+        {liveTables.map((table) => (
           <button
             aria-label={`Mesa ${table.id}: ${statusLabels[table.status]}`}
             className={`table-node ${table.status}`}
@@ -72,4 +86,25 @@ export function TableMap({ compact = false, onTableSelect }: TableMapProps) {
       </footer>
     </section>
   );
+}
+
+function tableNumberFromId(tableId: string): number | null {
+  const match = tableId.match(/(\d+)$/);
+  return match ? Number(match[1]) : null;
+}
+
+function mapAnalysisStateToTableStatus(state: string): TableStatus {
+  if (state === "dirty") {
+    return "dirty";
+  }
+  if (state === "finishing") {
+    return "finishing";
+  }
+  if (state === "eating" || state === "needs_setup" || state === "seated") {
+    return "occupied";
+  }
+  if (state === "away") {
+    return "releasing";
+  }
+  return "free";
 }

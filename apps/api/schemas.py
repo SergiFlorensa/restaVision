@@ -59,6 +59,22 @@ class YoloRestaurantDetectionStatusResponse(BaseModel):
     privacy_note: str
 
 
+class YoloPoseDetectionStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    available: bool
+    stream_url: str
+    camera_source: str
+    model_path: str
+    detector: str
+    confidence_threshold: float
+    keypoint_confidence_threshold: float
+    image_size: int
+    inference_stride: int
+    usage_note: str
+    privacy_note: str
+
+
 class ServiceAlertResponse(BaseModel):
     alert_id: str
     ts: datetime

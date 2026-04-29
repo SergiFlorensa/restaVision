@@ -121,18 +121,18 @@ export function CameraPanel({ streamUrl, onOpenSettings }: CameraPanelProps) {
 
         {!showEmptyState ? (
           <div className="camera-controls">
-            <button aria-label="Silenciar cámara" type="button">
-              <VolumeX size={22} />
-            </button>
             <button
               aria-label={expanded ? "Reducir cámara" : "Ampliar cámara"}
               onClick={toggleExpanded}
               type="button"
             >
-              {expanded ? <Minimize2 size={22} /> : <Maximize2 size={22} />}
+              {expanded ? <Minimize2 size={19} /> : <Maximize2 size={19} />}
             </button>
             <button aria-label="Más opciones" onClick={onOpenSettings} type="button">
-              <MoreVertical size={22} />
+              <MoreVertical size={19} />
+            </button>
+            <button aria-label="Silenciar cámara" type="button">
+              <VolumeX size={19} />
             </button>
           </div>
         ) : null}

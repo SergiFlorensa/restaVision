@@ -47,6 +47,7 @@ class ClassMetrics:
 class ClassificationReport:
     labels: tuple[str, ...]
     accuracy: float
+    matthews_correlation_coefficient: float
     macro_precision: float
     macro_recall: float
     macro_f1: float
@@ -144,12 +145,37 @@ def classification_report(
     return ClassificationReport(
         labels=confusion.labels,
         accuracy=accuracy,
+        matthews_correlation_coefficient=matthews_correlation_coefficient(confusion),
         macro_precision=float(np.mean([metrics.precision for metrics in per_class.values()])),
         macro_recall=float(np.mean([metrics.recall for metrics in per_class.values()])),
         macro_f1=float(np.mean([metrics.f1 for metrics in per_class.values()])),
         per_class=per_class,
         confusion=confusion,
     )
+
+
+def matthews_correlation_coefficient(confusion: ConfusionMatrix) -> float:
+    """Multiclass MCC for imbalanced table-state evaluation.
+
+    MCC is more informative than raw accuracy when relevant states such as
+    `dirty` or `finishing` are rare.
+    """
+
+    matrix = confusion.matrix.astype(np.float64)
+    total = float(matrix.sum())
+    if total <= 0:
+        return 0.0
+
+    true_positives_total = float(np.trace(matrix))
+    predicted_per_class = matrix.sum(axis=0)
+    actual_per_class = matrix.sum(axis=1)
+    covariance_ytyp = true_positives_total * total - float(
+        np.dot(predicted_per_class, actual_per_class)
+    )
+    covariance_ypyp = total**2 - float(np.dot(predicted_per_class, predicted_per_class))
+    covariance_ytyt = total**2 - float(np.dot(actual_per_class, actual_per_class))
+    denominator = float(np.sqrt(covariance_ypyp * covariance_ytyt))
+    return _safe_divide(covariance_ytyp, denominator)
 
 
 def evaluate_probability_predictions(

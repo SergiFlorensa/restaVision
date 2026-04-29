@@ -1,6 +1,14 @@
 import type { LucideIcon } from "lucide-react";
 
-export type TableStatus = "free" | "occupied" | "releasing" | "reserved" | "offline";
+export type TableStatus =
+  | "free"
+  | "occupied"
+  | "finishing"
+  | "dirty"
+  | "cleaning"
+  | "releasing"
+  | "reserved"
+  | "offline";
 
 export type MetricTone = "green" | "wine" | "gold" | "neutral";
 

@@ -14,7 +14,12 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { dashboardConfig, resolveCameraStreamUrl, resolveTableServiceAnalysisUrl } from "../config";
+import {
+  dashboardConfig,
+  resolveCameraStreamUrl,
+  resolveTableServiceAnalysisUrl,
+  resolveTableServiceEventsUrl,
+} from "../config";
 import { metrics, tables } from "../data/dashboard";
 import type {
   DrawerKind,
@@ -63,7 +68,7 @@ export function OverviewSection({ onOpenDrawer, onTableSelect }: Omit<SectionPag
       </div>
 
       <div className="map-area">
-        <TableMap onTableSelect={onTableSelect} />
+        <TableMap onTableSelect={onTableSelect} serviceAnalysis={serviceAnalysis} />
       </div>
 
       <div className="alerts-area">
@@ -224,7 +229,7 @@ function TableServiceCard({
           <ClipboardList size={21} />
           <h2>{tableLabel}</h2>
         </div>
-        <span className={analysis?.people_count ? "status-pill active" : "status-pill"}>
+        <span className={`status-pill ${statusTone(analysis?.state)}`}>
           {analysis ? stateLabel(analysis.state) : "Esperando c?mara"}
         </span>
       </div>
@@ -396,11 +401,13 @@ function useTableServiceAnalysis(): TableServiceAnalysis | null {
 
   useEffect(() => {
     let active = true;
-    const url = resolveTableServiceAnalysisUrl();
+    const analysisUrl = resolveTableServiceAnalysisUrl();
+    const eventsUrl = resolveTableServiceEventsUrl();
+    let eventSource: EventSource | null = null;
 
     async function fetchAnalysis() {
       try {
-        const response = await fetch(url);
+        const response = await fetch(analysisUrl);
         if (!response.ok) {
           return;
         }
@@ -416,10 +423,27 @@ function useTableServiceAnalysis(): TableServiceAnalysis | null {
     }
 
     void fetchAnalysis();
-    const interval = window.setInterval(() => void fetchAnalysis(), 2000);
+    const interval = window.setInterval(() => void fetchAnalysis(), eventsUrl ? 10000 : 2000);
+    if (eventsUrl && "EventSource" in window) {
+      eventSource = new EventSource(eventsUrl);
+      eventSource.addEventListener("table_service_analysis", (event) => {
+        try {
+          const payload = JSON.parse((event as MessageEvent).data) as TableServiceAnalysis;
+          if (active) {
+            setAnalysis(payload);
+          }
+        } catch {
+          void fetchAnalysis();
+        }
+      });
+      eventSource.onerror = () => {
+        void fetchAnalysis();
+      };
+    }
     return () => {
       active = false;
       window.clearInterval(interval);
+      eventSource?.close();
     };
   }, []);
 
@@ -479,6 +503,9 @@ function buildTableSummary(analysis: TableServiceAnalysis): string {
     return "Mesa preparada para recibir señal de cámara. Aún no hay análisis visual.";
   }
   if (analysis.people_count === 0) {
+    if (analysis.state === "dirty") {
+      return "No hay clientes en la mesa y quedan elementos de servicio. Prioridad de limpieza.";
+    }
     return "No hay clientes detectados en esta mesa. Se mantiene en observación.";
   }
   const missingCount = Object.values(analysis.missing_items).reduce(
@@ -490,6 +517,9 @@ function buildTableSummary(analysis: TableServiceAnalysis): string {
   }
   if (analysis.service_flags.food_served) {
     return `${analysis.people_count} cliente(s) detectados. La mesa tiene comida servida y no hay faltas críticas.`;
+  }
+  if (analysis.service_flags.ready_for_checkout) {
+    return `${analysis.people_count} cliente(s) detectados. Los platos parecen vacíos: posible momento de postre o cuenta.`;
   }
   return `${analysis.people_count} cliente(s) detectados. Servicio de mesa sin incidencias críticas.`;
 }
@@ -529,8 +559,17 @@ function buildTableChecklist(analysis: TableServiceAnalysis | null) {
       label: "Comida",
       detail: analysis.service_flags.food_served
         ? "Comida detectada en mesa"
+        : analysis.service_flags.ready_for_checkout
+          ? "Platos mayoritariamente vacíos"
         : "Sin comida detectada todavía",
       ok: true,
+    },
+    {
+      label: "Limpieza",
+      detail: analysis.service_flags.needs_cleaning
+        ? "Mesa pendiente de limpieza"
+        : "Sin limpieza urgente detectada",
+      ok: !analysis.service_flags.needs_cleaning,
     },
   ];
 }
@@ -543,8 +582,10 @@ function formatTableId(tableId: string): string {
 function stateLabel(state: string): string {
   const labels: Record<string, string> = {
     away: "Cliente ausente",
+    dirty: "Mesa sucia",
     eating: "Comiendo",
     empty: "Vacía",
+    finishing: "Finalizando",
     needs_setup: "Falta servicio",
     observing: "Observando",
     seated: "Sentado",
@@ -562,9 +603,25 @@ function eventLabel(eventType: string): string {
     missing_table_setup: "Servicio incompleto",
     plate_removed: "Retirada detectada",
     plate_served: "Plato detectado",
+    table_dirty: "Mesa sucia",
+    table_finishing: "Finalizando",
     table_session_started: "Inicio de mesa",
+    table_state_changed: "Cambio de estado",
   };
   return labels[eventType] ?? eventType;
+}
+
+function statusTone(state?: string): string {
+  if (state === "dirty") {
+    return "danger";
+  }
+  if (state === "finishing" || state === "away") {
+    return "warning";
+  }
+  if (state === "eating" || state === "needs_setup" || state === "seated") {
+    return "active";
+  }
+  return "";
 }
 
 function labelName(label: string): string {
@@ -572,6 +629,8 @@ function labelName(label: string): string {
     fork: "tenedor",
     knife: "cuchillo",
     plate: "plato",
+    plate_empty: "plato vacío",
+    plate_full: "plato con comida",
     spoon: "cuchara",
   };
   return labels[label] ?? label;

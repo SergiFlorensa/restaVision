@@ -357,9 +357,9 @@ button {
 }
 
 .camera-panel.expanded {
-  background: #090806;
+  background: rgb(7 6 5 / 96%);
   border-radius: 0;
-  inset: 18px;
+  inset: 16px;
   padding: 0;
   position: fixed;
   z-index: 80;
@@ -367,9 +367,14 @@ button {
 
 .camera-panel.expanded .camera-scene {
   aspect-ratio: auto;
-  border-radius: 12px;
+  background: #050505;
+  border-radius: 16px;
   height: 100%;
   min-height: 0;
+}
+
+.camera-panel.expanded .camera-stream {
+  object-fit: contain;
 }
 
 .camera-scene {
@@ -397,8 +402,8 @@ button {
 
 .camera-scene::after {
   background:
-    linear-gradient(90deg, rgb(0 0 0 / 28%), transparent 12%, transparent 88%, rgb(0 0 0 / 28%)),
-    linear-gradient(0deg, rgb(0 0 0 / 34%), transparent 45%);
+    linear-gradient(90deg, rgb(0 0 0 / 18%), transparent 14%, transparent 90%, rgb(0 0 0 / 16%)),
+    linear-gradient(0deg, rgb(0 0 0 / 20%), transparent 38%);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -451,12 +456,19 @@ button {
 
 .camera-topline {
   align-items: center;
+  backdrop-filter: blur(12px);
+  background: rgb(8 8 8 / 34%);
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 999px;
   color: #fff;
   display: flex;
-  inset: 18px 18px auto 20px;
+  gap: 12px;
+  inset: 14px auto auto 14px;
   justify-content: space-between;
+  max-width: min(470px, calc(100% - 94px));
+  padding: 8px 10px 8px 14px;
   position: absolute;
-  z-index: 3;
+  z-index: 4;
 }
 
 .camera-topline div {
@@ -466,6 +478,8 @@ button {
 }
 
 .camera-topline strong {
+  font-size: 14px;
+  line-height: 1;
   text-shadow: 0 1px 8px rgb(0 0 0 / 55%);
 }
 
@@ -473,19 +487,38 @@ button {
   background: var(--wine-soft);
   border-radius: 999px;
   box-shadow: 0 7px 24px rgb(121 9 24 / 36%);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 800;
-  padding: 6px 12px;
+  line-height: 1;
+  padding: 6px 10px;
 }
 
 .camera-topline button,
 .camera-controls button {
-  background: rgb(10 10 10 / 52%);
-  border: 1px solid rgb(255 255 255 / 16%);
-  border-radius: 9px;
+  align-items: center;
+  background: rgb(8 8 8 / 42%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 12px;
   color: #fff;
-  height: 46px;
-  width: 46px;
+  display: inline-flex;
+  height: 40px;
+  justify-content: center;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+  width: 40px;
+}
+
+.camera-topline button:hover,
+.camera-controls button:hover {
+  background: rgb(255 255 255 / 12%);
+  border-color: rgb(255 255 255 / 28%);
+  transform: translateY(-1px);
+}
+
+.camera-topline button {
+  display: none;
 }
 
 .room-perspective {
@@ -595,17 +628,28 @@ button {
 }
 
 .camera-controls {
-  bottom: 20px;
+  backdrop-filter: blur(14px);
+  background: rgb(8 8 8 / 36%);
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 16px;
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 7px;
   position: absolute;
-  right: 20px;
-  z-index: 3;
+  right: 14px;
+  top: 14px;
+  z-index: 4;
 }
 
 .camera-panel.expanded .camera-controls {
-  bottom: 28px;
-  right: 28px;
+  right: 22px;
+  top: 22px;
+}
+
+.camera-panel.expanded .camera-topline {
+  inset: 22px auto auto 22px;
+  max-width: calc(100% - 118px);
 }
 
 .metric-card {
@@ -720,6 +764,16 @@ button {
 .status-pill.active {
   background: rgb(66 109 54 / 12%);
   color: var(--green);
+}
+
+.status-pill.warning {
+  background: rgb(202 137 8 / 15%);
+  color: #9d6700;
+}
+
+.status-pill.danger {
+  background: rgb(121 9 24 / 12%);
+  color: var(--wine);
 }
 
 .table-service-summary {
@@ -967,6 +1021,21 @@ button {
 .occupied,
 .status-dot.occupied {
   background: var(--wine);
+}
+
+.finishing,
+.status-dot.finishing {
+  background: var(--gold);
+}
+
+.dirty,
+.status-dot.dirty {
+  background: #b0192c;
+}
+
+.cleaning,
+.status-dot.cleaning {
+  background: #6b705c;
 }
 
 .releasing,

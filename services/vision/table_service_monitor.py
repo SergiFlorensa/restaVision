@@ -8,7 +8,10 @@ from typing import Any
 from services.vision.geometry import ScoredDetection
 
 CUTLERY_LABELS: tuple[str, ...] = ("fork", "knife", "spoon")
-PLATE_LABELS: tuple[str, ...] = ("plate", "bowl")
+EMPTY_PLATE_LABELS: tuple[str, ...] = ("plate_empty",)
+FULL_PLATE_LABELS: tuple[str, ...] = ("plate_full",)
+SEMANTIC_PLATE_LABELS: tuple[str, ...] = EMPTY_PLATE_LABELS + FULL_PLATE_LABELS
+PLATE_LABELS: tuple[str, ...] = ("plate", "bowl") + SEMANTIC_PLATE_LABELS
 FOOD_LABELS: tuple[str, ...] = (
     "pizza",
     "sandwich",
@@ -64,6 +67,14 @@ class TableServiceMonitorConfig:
     min_people_for_service_check: int = 1
     alert_cooldown_seconds: int = 12
     max_timeline_events: int = 30
+    finishing_empty_plate_ratio: float = 0.5
+    dirty_grace_seconds: int = 180
+
+    def __post_init__(self) -> None:
+        if not 0 < self.finishing_empty_plate_ratio <= 1:
+            raise ValueError("finishing_empty_plate_ratio must be between 0 and 1.")
+        if self.dirty_grace_seconds < 0:
+            raise ValueError("dirty_grace_seconds must be >= 0.")
 
 
 @dataclass(slots=True)
@@ -154,6 +165,7 @@ class TableServiceMonitor:
         self._previous_people_count = 0
         self._previous_plate_count = 0
         self._previous_food_count = 0
+        self._previous_state = "waiting_for_video"
         self._latest_analysis = self._build_empty_analysis(datetime.now(UTC))
 
     def process(
@@ -167,7 +179,14 @@ class TableServiceMonitor:
         people_count = counts.get("person", 0)
         plate_count = count_matching_labels(counts, PLATE_LABELS)
         food_count = count_matching_labels(counts, FOOD_LABELS)
+        cutlery_count = count_matching_labels(counts, CUTLERY_LABELS)
         attention_count = count_matching_labels(counts, ATTENTION_LABELS)
+        empty_plate_count = count_matching_labels(counts, EMPTY_PLATE_LABELS)
+        full_plate_count = count_matching_labels(counts, FULL_PLATE_LABELS)
+        semantic_plate_count = empty_plate_count + full_plate_count
+        empty_plate_ratio = (
+            empty_plate_count / semantic_plate_count if semantic_plate_count > 0 else 0.0
+        )
 
         self._update_presence_state(people_count, ts)
         self._register_transition_events(
@@ -187,14 +206,28 @@ class TableServiceMonitor:
             ),
             "food_served": food_count > 0,
             "customer_needs_attention": attention_count > 0,
+            "semantic_plate_state_known": semantic_plate_count > 0,
+            "plates_empty_majority": (
+                semantic_plate_count > 0
+                and empty_plate_ratio >= self.config.finishing_empty_plate_ratio
+            ),
         }
         state = self._classify_state(
             people_count=people_count,
             plate_count=plate_count,
             food_count=food_count,
+            cutlery_count=cutlery_count,
+            empty_plate_count=empty_plate_count,
+            full_plate_count=full_plate_count,
+            empty_plate_ratio=empty_plate_ratio,
             missing_items=missing_items,
+            ts=ts,
         )
+        service_flags["ready_for_checkout"] = state == "finishing"
+        service_flags["needs_cleaning"] = state == "dirty"
+        self._register_state_event(state=state, counts=counts, ts=ts)
         active_alerts = self._build_active_alerts(
+            state=state,
             people_count=people_count,
             missing_items=missing_items,
             service_flags=service_flags,
@@ -218,6 +251,7 @@ class TableServiceMonitor:
         self._previous_people_count = people_count
         self._previous_plate_count = plate_count
         self._previous_food_count = food_count
+        self._previous_state = state
         return analysis
 
     def current(self) -> TableServiceAnalysis:
@@ -309,6 +343,7 @@ class TableServiceMonitor:
 
     def _build_active_alerts(
         self,
+        state: str,
         people_count: int,
         missing_items: dict[str, int],
         service_flags: dict[str, bool],
@@ -316,6 +351,28 @@ class TableServiceMonitor:
         ts: datetime,
     ) -> list[ServiceAlert]:
         alerts: list[ServiceAlert] = []
+        if state == "dirty":
+            alerts.append(
+                ServiceAlert(
+                    alert_id=f"{self.config.table_id}_dirty",
+                    ts=ts,
+                    alert_type="table_dirty",
+                    severity="high",
+                    message="Mesa pendiente de limpieza",
+                    evidence={"object_counts": counts},
+                )
+            )
+        if state == "finishing":
+            alerts.append(
+                ServiceAlert(
+                    alert_id=f"{self.config.table_id}_finishing",
+                    ts=ts,
+                    alert_type="table_finishing",
+                    severity="medium",
+                    message="Cliente posiblemente ha terminado",
+                    evidence={"object_counts": counts},
+                )
+            )
         if people_count > 0 and missing_items:
             message = build_missing_setup_message(missing_items)
             alerts.append(
@@ -354,13 +411,37 @@ class TableServiceMonitor:
         people_count: int,
         plate_count: int,
         food_count: int,
+        cutlery_count: int,
+        empty_plate_count: int,
+        full_plate_count: int,
+        empty_plate_ratio: float,
         missing_items: dict[str, int],
+        ts: datetime,
     ) -> str:
-        if people_count == 0 and self._away_started_at is not None:
-            return "away"
-        if people_count == 0 and plate_count == 0 and food_count == 0:
+        service_residue_count = plate_count + cutlery_count + food_count
+        semantic_plate_known = empty_plate_count + full_plate_count > 0
+        mostly_empty = (
+            semantic_plate_known and empty_plate_ratio >= self.config.finishing_empty_plate_ratio
+        )
+        dirty_evidence = (
+            empty_plate_count > 0
+            or (not semantic_plate_known and service_residue_count > 0)
+            or food_count > 0
+        )
+
+        if people_count == 0 and service_residue_count == 0:
             return "empty"
+        if people_count == 0 and self._away_started_at is not None:
+            if dirty_evidence and self._dirty_grace_elapsed(ts):
+                return "dirty"
+            return "away"
+        if people_count == 0 and dirty_evidence:
+            return "observing"
+        if people_count > 0 and mostly_empty:
+            return "finishing"
         if people_count > 0 and food_count > 0:
+            return "eating"
+        if people_count > 0 and full_plate_count > 0:
             return "eating"
         if people_count > 0 and missing_items:
             return "needs_setup"
@@ -377,6 +458,42 @@ class TableServiceMonitor:
         if self._away_started_at is None:
             return None
         return max(0, int((ts - self._away_started_at).total_seconds()))
+
+    def _dirty_grace_elapsed(self, ts: datetime) -> bool:
+        if self._away_started_at is None:
+            return False
+        elapsed = (ts - self._away_started_at).total_seconds()
+        return elapsed >= self.config.dirty_grace_seconds
+
+    def _register_state_event(self, state: str, counts: dict[str, int], ts: datetime) -> None:
+        if state == self._previous_state:
+            return
+        if self._previous_state == "waiting_for_video" and state in {"empty", "observing"}:
+            return
+        self._emit_event(
+            "table_state_changed",
+            state_change_message(state),
+            ts,
+            {
+                "previous_state": self._previous_state,
+                "new_state": state,
+                "object_counts": counts,
+            },
+        )
+        if state == "dirty":
+            self._emit_event(
+                "table_dirty",
+                "Mesa pendiente de limpieza",
+                ts,
+                {"object_counts": counts},
+            )
+        if state == "finishing":
+            self._emit_event(
+                "table_finishing",
+                "Cliente posiblemente ha terminado",
+                ts,
+                {"object_counts": counts},
+            )
 
     def _emit_event(
         self,
@@ -418,6 +535,10 @@ class TableServiceMonitor:
                 "cutlery_complete": False,
                 "food_served": False,
                 "customer_needs_attention": False,
+                "semantic_plate_state_known": False,
+                "plates_empty_majority": False,
+                "ready_for_checkout": False,
+                "needs_cleaning": False,
             },
             active_alerts=[],
             timeline_events=[],
@@ -447,3 +568,17 @@ def build_missing_setup_message(missing_items: dict[str, int]) -> str:
         return "Servicio de mesa completo"
     parts = [f"{label}: {amount}" for label, amount in sorted(missing_items.items())]
     return "Falta completar servicio de mesa — " + ", ".join(parts)
+
+
+def state_change_message(state: str) -> str:
+    messages = {
+        "away": "Cliente se ausenta de la mesa",
+        "dirty": "Mesa pendiente de limpieza",
+        "eating": "Cliente comiendo",
+        "empty": "Mesa vacía",
+        "finishing": "Cliente posiblemente ha terminado",
+        "needs_setup": "Servicio de mesa incompleto",
+        "observing": "Mesa en observación",
+        "seated": "Cliente sentado",
+    }
+    return messages.get(state, f"Estado de mesa: {state}")

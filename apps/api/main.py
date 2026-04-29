@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import platform
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from time import sleep
+from threading import Condition, Event, Thread
+from time import perf_counter, sleep
 from typing import Any
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from services.alerts.anomaly import OperationalAlert
 from services.events.models import (
@@ -21,10 +26,16 @@ from services.events.models import (
     ZoneDefinition,
 )
 from services.events.persistence import SqlAlchemyMVPRepository
+from services.events.realtime import RealtimeEvent, RealtimeEventBus, RealtimeSubscription
 from services.events.service import RestaurantMVPService
 from services.events.settings import PersistenceSettings
 from services.vision.detection_policy import DetectionPolicy, TemporalEvidenceAccumulator
 from services.vision.person_demo import DemoPersonDetectionConfig, OpenCVPersonDemoDetector
+from services.vision.pose import (
+    UltralyticsYoloPoseEstimator,
+    YoloPoseConfig,
+    draw_pose_detections,
+)
 from services.vision.realtime import FrameSkippingConfig, FrameSkippingPolicy
 from services.vision.table_roi import TableRoi, TableRoiAnalyzer, parse_table_roi
 from services.vision.table_service_monitor import (
@@ -67,6 +78,7 @@ from apps.api.schemas import (
     TableServiceMonitorStatusResponse,
     TableUpsertRequest,
     YoloPersonDetectionStatusResponse,
+    YoloPoseDetectionStatusResponse,
     YoloRestaurantDetectionStatusResponse,
     ZoneResponse,
     ZoneUpsertRequest,
@@ -79,8 +91,21 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         version="0.1.0",
         summary="Local MVP API for the RestaurIA operational copilot.",
     )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:4173",
+            "http://localhost:5173",
+            "http://localhost:4173",
+        ],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+    )
     app.state.mvp_service = mvp_service or build_mvp_service_from_environment()
     app.state.table_service_analyses = {}
+    app.state.table_service_realtime_bus = RealtimeEventBus(max_queue_size=100)
+    app.state.table_service_realtime_signatures = {}
 
     @app.get("/", tags=["root"])
     def root() -> dict[str, str]:
@@ -230,6 +255,43 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             ),
         )
 
+    @app.get(
+        "/api/v1/demo/yolo-pose/status",
+        response_model=YoloPoseDetectionStatusResponse,
+        tags=["vision-demo"],
+    )
+    def yolo_pose_detection_status(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n-pose.pt"),
+        confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        keypoint_confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        image_size: int = Query(default=256, ge=160, le=1280),
+        inference_stride: int = Query(default=6, ge=1, le=30),
+    ) -> YoloPoseDetectionStatusResponse:
+        return YoloPoseDetectionStatusResponse(
+            available=is_ultralytics_available(),
+            stream_url=(
+                "/api/v1/demo/yolo-pose/stream"
+                f"?source={source}&model={model}&confidence={confidence}"
+                f"&keypoint_confidence={keypoint_confidence}"
+                f"&image_size={image_size}&inference_stride={inference_stride}"
+            ),
+            camera_source=str(source),
+            model_path=model,
+            detector="Ultralytics YOLO pose con esqueleto 2D y silueta aproximada",
+            confidence_threshold=confidence,
+            keypoint_confidence_threshold=keypoint_confidence,
+            image_size=image_size,
+            inference_stride=inference_stride,
+            usage_note=(
+                "Modo opcional para probar pose/silueta humana. No sustituye el flujo "
+                "principal de ocupación; úsalo con image_size bajo y stride alto en CPU."
+            ),
+            privacy_note=(
+                "Estima puntos corporales anónimos; no identifica rostros, nombres ni identidad."
+            ),
+        )
+
     @app.get("/api/v1/demo/yolo-person/stream", tags=["vision-demo"])
     def yolo_person_detection_stream(
         source: int | str = Query(default=0),
@@ -298,6 +360,46 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
 
+    @app.get("/api/v1/demo/yolo-pose/stream", tags=["vision-demo"])
+    def yolo_pose_detection_stream(
+        source: int | str = Query(default=0),
+        model: str = Query(default="yolo11n-pose.pt"),
+        confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        iou: float = Query(default=0.5, ge=0.0, le=1.0),
+        keypoint_confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        width: int = Query(default=640, ge=160, le=1920),
+        height: int = Query(default=480, ge=120, le=1080),
+        image_size: int = Query(default=256, ge=160, le=1280),
+        max_detections: int = Query(default=10, ge=1, le=50),
+        inference_stride: int = Query(default=6, ge=1, le=30),
+        min_box_area_ratio: float = Query(default=0.001, ge=0.0, le=1.0),
+        jpeg_quality: int = Query(default=72, ge=35, le=95),
+        draw_boxes: bool = Query(default=False),
+        draw_silhouette: bool = Query(default=True),
+    ) -> StreamingResponse:
+        config = YoloPoseConfig(
+            model_path=model,
+            confidence_threshold=confidence,
+            iou_threshold=iou,
+            image_size=image_size,
+            max_detections=max_detections,
+            keypoint_confidence_threshold=keypoint_confidence,
+            min_box_area_ratio=min_box_area_ratio,
+        )
+        return StreamingResponse(
+            _iter_yolo_pose_mjpeg(
+                source=source,
+                width=width,
+                height=height,
+                pose_config=config,
+                inference_stride=inference_stride,
+                jpeg_quality=jpeg_quality,
+                draw_boxes=draw_boxes,
+                draw_silhouette=draw_silhouette,
+            ),
+            media_type="multipart/x-mixed-replace; boundary=frame",
+        )
+
     @app.get(
         "/api/v1/demo/table-service/status",
         response_model=TableServiceMonitorStatusResponse,
@@ -310,6 +412,7 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         confidence: float = Query(default=0.25, ge=0.0, le=1.0),
         iou: float = Query(default=0.5, ge=0.0, le=1.0),
         inference_stride: int = Query(default=3, ge=1, le=30),
+        pose_overlay: bool = Query(default=False),
     ) -> TableServiceMonitorStatusResponse:
         return TableServiceMonitorStatusResponse(
             available=is_ultralytics_available(),
@@ -317,6 +420,7 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
                 "/api/v1/demo/table-service/stream"
                 f"?source={source}&table_id={table_id}&model={model}"
                 f"&confidence={confidence}&iou={iou}&inference_stride={inference_stride}"
+                f"&pose_overlay={str(pose_overlay).lower()}"
             ),
             camera_source=str(source),
             table_id=table_id,
@@ -344,6 +448,20 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         max_detections: int = Query(default=30, ge=1, le=100),
         inference_stride: int = Query(default=3, ge=1, le=30),
         min_box_area_ratio: float = Query(default=0.0002, ge=0.0, le=1.0),
+        jpeg_quality: int = Query(default=72, ge=35, le=95),
+        dirty_grace_seconds: int = Query(default=180, ge=0, le=900),
+        finishing_empty_plate_ratio: float = Query(default=0.5, gt=0.0, le=1.0),
+        pose_overlay: bool = Query(
+            default=False,
+            description="Dibuja esqueleto/silueta humana encima del análisis de mesa.",
+        ),
+        pose_model: str = Query(default="yolo11n-pose.pt"),
+        pose_image_size: int = Query(default=256, ge=160, le=1280),
+        pose_inference_stride: int = Query(default=10, ge=1, le=60),
+        pose_confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        pose_keypoint_confidence: float = Query(default=0.35, ge=0.0, le=1.0),
+        pose_draw_boxes: bool = Query(default=False),
+        pose_draw_silhouette: bool = Query(default=True),
         roi: str | None = Query(
             default=None,
             description="ROI opcional de mesa en formato x_min,y_min,x_max,y_max.",
@@ -354,6 +472,10 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             description=(
                 "Muestra paneles de texto encima del vídeo. Por defecto se delega al dashboard."
             ),
+        ),
+        edge_hud: bool = Query(
+            default=False,
+            description="Muestra FPS, latencia y frecuencia de inferencia sobre el v?deo.",
         ),
     ) -> StreamingResponse:
         try:
@@ -380,6 +502,30 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
                 analysis_store=app.state.table_service_analyses,
                 table_roi=table_roi,
                 text_overlay=text_overlay,
+                jpeg_quality=jpeg_quality,
+                pose_config=(
+                    YoloPoseConfig(
+                        model_path=pose_model,
+                        confidence_threshold=pose_confidence,
+                        image_size=pose_image_size,
+                        max_detections=8,
+                        keypoint_confidence_threshold=pose_keypoint_confidence,
+                        min_box_area_ratio=0.001,
+                    )
+                    if pose_overlay
+                    else None
+                ),
+                pose_inference_stride=pose_inference_stride,
+                pose_draw_boxes=pose_draw_boxes,
+                pose_draw_silhouette=pose_draw_silhouette,
+                edge_hud=edge_hud,
+                monitor_config=TableServiceMonitorConfig(
+                    table_id=table_id,
+                    dirty_grace_seconds=dirty_grace_seconds,
+                    finishing_empty_plate_ratio=finishing_empty_plate_ratio,
+                ),
+                realtime_bus=app.state.table_service_realtime_bus,
+                realtime_signatures=app.state.table_service_realtime_signatures,
             ),
             media_type="multipart/x-mixed-replace; boundary=frame",
         )
@@ -398,6 +544,36 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         if analysis is None:
             analysis = TableServiceMonitor(TableServiceMonitorConfig(table_id=table_id)).current()
         return serialize_table_service_analysis(analysis)
+
+    @app.get(
+        "/api/v1/demo/table-service/events/stream",
+        tags=["vision-demo"],
+    )
+    async def stream_table_service_events(
+        request: Request,
+        table_id: str | None = Query(
+            default=None,
+            description="Filtra eventos SSE por mesa. Si se omite, emite todas las mesas.",
+        ),
+        heartbeat_seconds: int = Query(default=15, ge=5, le=60),
+    ) -> StreamingResponse:
+        bus: RealtimeEventBus = request.app.state.table_service_realtime_bus
+        subscription = bus.subscribe()
+        return StreamingResponse(
+            _iter_realtime_sse(
+                request=request,
+                bus=bus,
+                subscription=subscription,
+                table_id=table_id,
+                heartbeat_seconds=heartbeat_seconds,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/api/v1/cameras", response_model=list[CameraResponse], tags=["catalog"])
     def list_cameras(request: Request) -> list[CameraResponse]:
@@ -557,6 +733,8 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         image_size: int = Query(default=320, ge=160, le=1280),
         max_detections: int = Query(default=30, ge=1, le=100),
         min_box_area_ratio: float = Query(default=0.0002, ge=0.0, le=1.0),
+        dirty_grace_seconds: int = Query(default=180, ge=0, le=900),
+        finishing_empty_plate_ratio: float = Query(default=0.5, gt=0.0, le=1.0),
         roi: str | None = Query(
             default=None,
             description="ROI opcional de mesa en formato x_min,y_min,x_max,y_max.",
@@ -581,7 +759,13 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         detector = UltralyticsYoloDetector(config)
         table_detector = TableRoiAnalyzer(detector)
         detection_policy = DetectionPolicy()
-        monitor = TableServiceMonitor(TableServiceMonitorConfig(table_id=table_id))
+        monitor = TableServiceMonitor(
+            TableServiceMonitorConfig(
+                table_id=table_id,
+                dirty_grace_seconds=dirty_grace_seconds,
+                finishing_empty_plate_ratio=finishing_empty_plate_ratio,
+            )
+        )
 
         normalized_source = _normalize_video_source(source)
         capture = _open_video_capture(cv2, normalized_source)
@@ -610,6 +794,11 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             )
             analysis = monitor.process(detections)
             app.state.table_service_analyses[table_id] = analysis
+            _publish_table_service_realtime_update(
+                analysis=analysis,
+                bus=app.state.table_service_realtime_bus,
+                signatures=app.state.table_service_realtime_signatures,
+            )
             return serialize_table_service_analysis(analysis)
         finally:
             capture.release()
@@ -724,6 +913,44 @@ def serialize_table_service_analysis(
         timeline_events=[serialize_service_event(event) for event in analysis.timeline_events],
         seat_duration_seconds=analysis.seat_duration_seconds,
         away_duration_seconds=analysis.away_duration_seconds,
+    )
+
+
+def _publish_table_service_realtime_update(
+    analysis: TableServiceAnalysis,
+    bus: RealtimeEventBus,
+    signatures: dict[str, tuple[Any, ...]],
+) -> None:
+    signature = _table_service_realtime_signature(analysis)
+    if signatures.get(analysis.table_id) == signature:
+        return
+    signatures[analysis.table_id] = signature
+    response = serialize_table_service_analysis(analysis)
+    bus.publish(
+        RealtimeEvent(
+            event_type="table_service_analysis",
+            event_id=f"{analysis.table_id}:{int(analysis.updated_at.timestamp() * 1000)}",
+            payload=response.model_dump(mode="json"),
+        )
+    )
+
+
+def _table_service_realtime_signature(analysis: TableServiceAnalysis) -> tuple[Any, ...]:
+    latest_event_id = analysis.timeline_events[0].event_id if analysis.timeline_events else None
+    active_alerts = tuple(
+        (alert.alert_id, alert.alert_type, alert.severity, alert.message)
+        for alert in analysis.active_alerts
+    )
+    return (
+        analysis.state,
+        analysis.people_count,
+        tuple(sorted(analysis.object_counts.items())),
+        tuple(sorted(analysis.missing_items.items())),
+        tuple(sorted(analysis.service_flags.items())),
+        active_alerts,
+        latest_event_id,
+        (analysis.seat_duration_seconds or 0) // 10,
+        (analysis.away_duration_seconds or 0) // 10,
     )
 
 
@@ -874,6 +1101,69 @@ def _iter_yolo_detection_mjpeg(
         capture.release()
 
 
+def _iter_yolo_pose_mjpeg(
+    source: int | str,
+    width: int,
+    height: int,
+    pose_config: YoloPoseConfig,
+    inference_stride: int,
+    jpeg_quality: int,
+    draw_boxes: bool,
+    draw_silhouette: bool,
+) -> Any:
+    cv2 = _load_cv2_for_demo_stream()
+    estimator: UltralyticsYoloPoseEstimator | None = None
+    frame_index = 0
+    last_poses = []
+    policy = FrameSkippingPolicy(
+        FrameSkippingConfig(base_interval=inference_stride, hot_interval=inference_stride)
+    )
+    capture = _LatestFrameCapture(cv2=cv2, source=source, width=width, height=height)
+    capture.start()
+    last_frame_index = -1
+
+    try:
+        while True:
+            packet = capture.read_latest(after_index=last_frame_index, timeout_seconds=1.0)
+            if packet is None:
+                sleep(0.05)
+                continue
+            current_frame_index, frame = packet
+            if current_frame_index == last_frame_index:
+                continue
+            last_frame_index = current_frame_index
+
+            if estimator is None:
+                warmup_frame = frame.copy()
+                cv2.putText(
+                    warmup_frame,
+                    "Inicializando YOLO pose...",
+                    (20, 36),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.75,
+                    (245, 245, 245),
+                    2,
+                    cv2.LINE_AA,
+                )
+                yield _mjpeg_frame(encode_jpeg(warmup_frame, jpeg_quality=jpeg_quality))
+                estimator = UltralyticsYoloPoseEstimator(pose_config)
+
+            if policy.should_process(frame_index) and estimator is not None:
+                last_poses = estimator.detect(frame)
+            frame_index += 1
+
+            annotated = draw_pose_detections(
+                frame,
+                last_poses,
+                draw_boxes=draw_boxes,
+                draw_silhouette=draw_silhouette,
+            )
+            frame_bytes = encode_jpeg(annotated, jpeg_quality=jpeg_quality)
+            yield _mjpeg_frame(frame_bytes)
+    finally:
+        capture.close()
+
+
 def _iter_table_service_analysis_mjpeg(
     source: int | str,
     table_id: str,
@@ -884,32 +1174,62 @@ def _iter_table_service_analysis_mjpeg(
     analysis_store: dict[str, TableServiceAnalysis],
     table_roi: TableRoi | None,
     text_overlay: bool,
+    jpeg_quality: int,
+    pose_config: YoloPoseConfig | None,
+    pose_inference_stride: int,
+    pose_draw_boxes: bool,
+    pose_draw_silhouette: bool,
+    edge_hud: bool,
+    monitor_config: TableServiceMonitorConfig,
+    realtime_bus: RealtimeEventBus,
+    realtime_signatures: dict[str, tuple[Any, ...]],
 ) -> Any:
     cv2 = _load_cv2_for_demo_stream()
     detector: UltralyticsYoloDetector | None = None
     table_detector: TableRoiAnalyzer | None = None
+    pose_estimator: UltralyticsYoloPoseEstimator | None = None
     detection_policy = DetectionPolicy()
     evidence = TemporalEvidenceAccumulator(detection_policy)
-    monitor = TableServiceMonitor(TableServiceMonitorConfig(table_id=table_id))
+    monitor = TableServiceMonitor(monitor_config)
     frame_index = 0
     last_detections = []
+    last_poses = []
     last_stable_counts: dict[str, int] = {}
     policy = FrameSkippingPolicy(
         FrameSkippingConfig(base_interval=inference_stride, hot_interval=inference_stride)
     )
-    capture = _open_video_capture(cv2, source)
-    capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    if not capture.isOpened():
-        capture.release()
-        raise RuntimeError(f"Could not open video source: {source!r}")
+    pose_policy = FrameSkippingPolicy(
+        FrameSkippingConfig(base_interval=pose_inference_stride, hot_interval=pose_inference_stride)
+    )
+    capture = _LatestFrameCapture(cv2=cv2, source=source, width=width, height=height)
+    try:
+        capture.start()
+    except RuntimeError as exc:
+        error_frame = _build_stream_error_frame(
+            cv2,
+            title="Camara no disponible",
+            message=str(exc),
+            hint="Revisa DroidCam, IP, WiFi o cierra otro visor que use la camara.",
+        )
+        yield _mjpeg_frame(encode_jpeg(error_frame, jpeg_quality=jpeg_quality))
+        return
+    last_frame_index = -1
+    last_frame_ts = perf_counter()
+    fps_ema = 0.0
+    table_latency_ms = 0.0
+    pose_latency_ms = 0.0
 
     try:
         while True:
-            ok, frame = capture.read()
-            if not ok or frame is None:
+            frame_start = perf_counter()
+            packet = capture.read_latest(after_index=last_frame_index, timeout_seconds=1.0)
+            if packet is None:
                 sleep(0.05)
                 continue
+            current_frame_index, frame = packet
+            if current_frame_index == last_frame_index:
+                continue
+            last_frame_index = current_frame_index
 
             if detector is None:
                 warmup_frame = frame.copy()
@@ -923,11 +1243,14 @@ def _iter_table_service_analysis_mjpeg(
                     2,
                     cv2.LINE_AA,
                 )
-                yield _mjpeg_frame(encode_jpeg(warmup_frame))
+                yield _mjpeg_frame(encode_jpeg(warmup_frame, jpeg_quality=jpeg_quality))
                 detector = UltralyticsYoloDetector(detector_config)
                 table_detector = TableRoiAnalyzer(detector)
+                if pose_config is not None:
+                    pose_estimator = UltralyticsYoloPoseEstimator(pose_config)
 
             if policy.should_process(frame_index) and table_detector is not None:
+                table_start = perf_counter()
                 detections = table_detector.detect(frame, table_roi)
                 last_detections = detection_policy.filter_detections(
                     detections,
@@ -936,23 +1259,63 @@ def _iter_table_service_analysis_mjpeg(
                 )
                 evidence_snapshot = evidence.update(last_detections)
                 last_stable_counts = evidence_snapshot.stable_counts
+                table_latency_ms = (perf_counter() - table_start) * 1000
+            if (
+                pose_config is not None
+                and pose_estimator is not None
+                and pose_policy.should_process(frame_index)
+            ):
+                pose_start = perf_counter()
+                last_poses = pose_estimator.detect(frame)
+                pose_latency_ms = (perf_counter() - pose_start) * 1000
 
             analysis = monitor.process(
                 last_detections,
                 stable_counts=last_stable_counts,
             )
             analysis_store[table_id] = analysis
+            _publish_table_service_realtime_update(
+                analysis=analysis,
+                bus=realtime_bus,
+                signatures=realtime_signatures,
+            )
             frame_index += 1
 
             annotated = draw_yolo_detections(frame, last_detections)
+            if pose_config is not None:
+                annotated = draw_pose_detections(
+                    annotated,
+                    last_poses,
+                    draw_boxes=pose_draw_boxes,
+                    draw_silhouette=pose_draw_silhouette,
+                )
             if table_roi is not None:
                 annotated = _draw_table_roi(annotated, table_roi, cv2)
             if text_overlay:
                 annotated = _draw_table_service_analysis(annotated, last_detections, analysis, cv2)
-            frame_bytes = encode_jpeg(annotated)
+            now = perf_counter()
+            instant_fps = 1.0 / max(0.001, now - last_frame_ts)
+            fps_ema = instant_fps if fps_ema <= 0 else (fps_ema * 0.9 + instant_fps * 0.1)
+            last_frame_ts = now
+            if edge_hud:
+                annotated = _draw_edge_hud(
+                    annotated,
+                    cv2=cv2,
+                    fps=fps_ema,
+                    table_latency_ms=table_latency_ms,
+                    pose_latency_ms=pose_latency_ms,
+                    frame_latency_ms=(perf_counter() - frame_start) * 1000,
+                    inference_stride=inference_stride,
+                    pose_inference_stride=(
+                        pose_inference_stride if pose_config is not None else None
+                    ),
+                    object_count=len(last_detections),
+                    pose_count=len(last_poses),
+                )
+            frame_bytes = encode_jpeg(annotated, jpeg_quality=jpeg_quality)
             yield _mjpeg_frame(frame_bytes)
     finally:
-        capture.release()
+        capture.close()
 
 
 def _draw_table_service_analysis(
@@ -999,6 +1362,101 @@ def _draw_table_service_analysis(
         cv2=cv2,
     )
     return output
+
+
+def _draw_edge_hud(
+    frame: Any,
+    *,
+    cv2: Any,
+    fps: float,
+    table_latency_ms: float,
+    pose_latency_ms: float,
+    frame_latency_ms: float,
+    inference_stride: int,
+    pose_inference_stride: int | None,
+    object_count: int,
+    pose_count: int,
+) -> Any:
+    """Dibuja telemetría edge mínima para validar fluidez en pruebas reales."""
+    output = frame.copy()
+    height, width = output.shape[:2]
+    panel_width = min(360, max(250, width // 3))
+    x = max(8, width - panel_width - 12)
+    y = max(8, height - 118)
+    lines = [
+        f"FPS video: {fps:4.1f}",
+        f"YOLO mesa: {table_latency_ms:5.0f} ms | cada {inference_stride} frames",
+        (
+            f"Pose: {pose_latency_ms:5.0f} ms | cada {pose_inference_stride} frames"
+            if pose_inference_stride is not None
+            else "Pose: OFF"
+        ),
+        f"Frame: {frame_latency_ms:5.0f} ms | obj {object_count} | poses {pose_count}",
+    ]
+    tone = (58, 128, 75) if fps >= 12 else (30, 135, 210) if fps >= 7 else (55, 55, 180)
+
+    overlay = output.copy()
+    cv2.rectangle(overlay, (x, y), (width - 12, height - 12), (16, 18, 16), -1)
+    output = cv2.addWeighted(overlay, 0.72, output, 0.28, 0)
+    cv2.rectangle(output, (x, y), (width - 12, height - 12), tone, 2)
+    cv2.circle(output, (x + 16, y + 19), 6, tone, -1)
+    cv2.putText(
+        output,
+        "EDGE HUD",
+        (x + 30, y + 24),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.56,
+        (245, 245, 245),
+        2,
+        cv2.LINE_AA,
+    )
+    for index, line in enumerate(lines):
+        cv2.putText(
+            output,
+            line,
+            (x + 12, y + 48 + index * 18),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (214, 232, 205),
+            1,
+            cv2.LINE_AA,
+        )
+    return output
+
+
+def _build_stream_error_frame(cv2: Any, *, title: str, message: str, hint: str) -> Any:
+    frame = np.zeros((480, 854, 3), dtype=np.uint8)
+    frame[:] = (18, 14, 12)
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (32, 52), (822, 428), (34, 29, 25), -1)
+    frame = cv2.addWeighted(overlay, 0.92, frame, 0.08, 0)
+    cv2.rectangle(frame, (32, 52), (822, 428), (121, 9, 24), 2)
+    cv2.circle(frame, (74, 104), 14, (28, 28, 180), -1)
+    cv2.putText(
+        frame,
+        title,
+        (104, 112),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.9,
+        (245, 245, 245),
+        2,
+        cv2.LINE_AA,
+    )
+    lines = _wrap_overlay_text(message, 720, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1, cv2)
+    lines.extend(_wrap_overlay_text(hint, 720, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1, cv2))
+    lines.append("Para iPhone/DroidCam: abre la app, pulsa Start y evita abrir otro visor.")
+    for index, line in enumerate(lines[:10]):
+        cv2.putText(
+            frame,
+            line,
+            (64, 166 + index * 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (218, 211, 198),
+            1,
+            cv2.LINE_AA,
+        )
+    return frame
 
 
 def _draw_table_roi(frame: Any, table_roi: TableRoi, cv2: Any) -> Any:
@@ -1138,6 +1596,111 @@ def _format_seconds(seconds: int) -> str:
     return f"{minutes:02d}:{remaining_seconds:02d}"
 
 
+class _LatestFrameCapture:
+    """Reads camera frames in the background and exposes only the newest frame."""
+
+    def __init__(
+        self,
+        cv2: Any,
+        source: int | str,
+        width: int,
+        height: int,
+        buffer_size: int = 1,
+    ) -> None:
+        self._cv2 = cv2
+        self._source = source
+        self._width = width
+        self._height = height
+        self._buffer_size = buffer_size
+        self._capture: Any | None = None
+        self._condition = Condition()
+        self._stop = Event()
+        self._thread: Thread | None = None
+        self._latest_frame: Any | None = None
+        self._latest_index = -1
+        self._open_error: RuntimeError | None = None
+
+    def start(self) -> None:
+        capture = _open_video_capture(self._cv2, self._source)
+        _configure_low_latency_capture(
+            self._cv2,
+            capture,
+            source=self._source,
+            width=self._width,
+            height=self._height,
+            buffer_size=self._buffer_size,
+        )
+        if not capture.isOpened():
+            capture.release()
+            raise RuntimeError(f"Could not open video source: {self._source!r}")
+
+        self._capture = capture
+        self._thread = Thread(
+            target=self._read_loop,
+            name="restauria-latest-frame-capture",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def read_latest(
+        self,
+        after_index: int,
+        timeout_seconds: float,
+    ) -> tuple[int, Any] | None:
+        with self._condition:
+            if self._latest_index <= after_index and self._open_error is None:
+                self._condition.wait(timeout_seconds)
+            if self._open_error is not None:
+                raise self._open_error
+            if self._latest_frame is None or self._latest_index <= after_index:
+                return None
+            return self._latest_index, self._latest_frame
+
+    def close(self) -> None:
+        self._stop.set()
+        with self._condition:
+            self._condition.notify_all()
+        if self._thread is not None:
+            self._thread.join(timeout=1.5)
+        if self._capture is not None:
+            self._capture.release()
+            self._capture = None
+
+    def _read_loop(self) -> None:
+        if self._capture is None:
+            return
+        frame_index = 0
+        while not self._stop.is_set():
+            ok, frame = self._capture.read()
+            if not ok or frame is None:
+                sleep(0.02)
+                continue
+            with self._condition:
+                self._latest_index = frame_index
+                self._latest_frame = frame
+                frame_index += 1
+                self._condition.notify_all()
+
+
+def _configure_low_latency_capture(
+    cv2: Any,
+    capture: Any,
+    source: int | str,
+    width: int,
+    height: int,
+    buffer_size: int,
+) -> None:
+    if buffer_size > 0:
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, buffer_size)
+    normalized_source = _normalize_video_source(source)
+    if not isinstance(normalized_source, int):
+        return
+    if width > 0:
+        capture.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    if height > 0:
+        capture.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+
+
 def _open_video_capture(cv2: Any, source: int | str) -> Any:
     source = _normalize_video_source(source)
     if platform.system() == "Windows" and isinstance(source, int):
@@ -1176,6 +1739,40 @@ def _mjpeg_frame(frame_bytes: bytes) -> bytes:
         b"Content-Type: image/jpeg\r\n"
         b"Cache-Control: no-store\r\n\r\n" + frame_bytes + b"\r\n"
     )
+
+
+async def _iter_realtime_sse(
+    request: Request,
+    bus: RealtimeEventBus,
+    subscription: RealtimeSubscription,
+    table_id: str | None,
+    heartbeat_seconds: int,
+) -> Any:
+    try:
+        yield b": restauria connected\n\n"
+        while True:
+            if await request.is_disconnected():
+                break
+            event = await asyncio.to_thread(subscription.get, float(heartbeat_seconds))
+            if event is None:
+                yield b": heartbeat\n\n"
+                continue
+            if table_id is not None and event.payload.get("table_id") != table_id:
+                continue
+            yield _sse_frame(event)
+    finally:
+        bus.unsubscribe(subscription)
+
+
+def _sse_frame(event: RealtimeEvent) -> bytes:
+    lines: list[str] = []
+    if event.event_id is not None:
+        lines.append(f"id: {event.event_id}")
+    lines.append(f"event: {event.event_type}")
+    data = json.dumps(event.payload, ensure_ascii=False, separators=(",", ":"))
+    for line in data.splitlines() or ["{}"]:
+        lines.append(f"data: {line}")
+    return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
 def _load_cv2_for_demo_stream() -> Any:

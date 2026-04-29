@@ -10,6 +10,7 @@ from services.evaluation.metrics import (
     confusion_matrix,
     evaluate_probability_predictions,
     expected_calibration_error,
+    matthews_correlation_coefficient,
     sweep_confidence_thresholds,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "confusion_matrix",
     "evaluate_probability_predictions",
     "expected_calibration_error",
+    "matthews_correlation_coefficient",
     "sweep_confidence_thresholds",
 ]

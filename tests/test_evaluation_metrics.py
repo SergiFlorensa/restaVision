@@ -7,6 +7,7 @@ from services.evaluation.metrics import (
     confusion_matrix,
     evaluate_probability_predictions,
     expected_calibration_error,
+    matthews_correlation_coefficient,
     sweep_confidence_thresholds,
 )
 
@@ -40,6 +41,17 @@ def test_classification_report_exposes_macro_metrics() -> None:
     assert report.per_class["ready"].recall == pytest.approx(0.5)
     assert report.per_class["occupied"].support == 2
     assert 0 < report.macro_f1 < 1
+    assert 0 < report.matthews_correlation_coefficient < 1
+
+
+def test_mcc_penalizes_imbalanced_dirty_table_errors() -> None:
+    confusion = confusion_matrix(
+        y_true=("ready", "ready", "ready", "occupied", "occupied", "dirty"),
+        y_pred=("ready", "ready", "ready", "occupied", "ready", "ready"),
+        labels=("ready", "occupied", "dirty"),
+    )
+
+    assert matthews_correlation_coefficient(confusion) == pytest.approx(0.471939903, rel=1e-6)
 
 
 def test_probability_evaluation_reports_nll_brier_and_calibration() -> None:

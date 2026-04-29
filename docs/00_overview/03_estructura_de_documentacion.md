@@ -77,6 +77,8 @@ repo_root/
       23_dashboard_operativo_web.md
       24_yolo_d2l_deteccion_personas.md
       25_d2l_distribution_shift_monitor_visual.md
+      26_edge_ai_cpu_sse_y_baja_latencia.md
+      27_pose_humana_opcional.md
     05_hardware_y_costes/
       01_hardware_minimo_mvp.md
       02_hardware_recomendado_por_fases.md

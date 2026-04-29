@@ -125,6 +125,39 @@ def test_yolo_restaurant_detection_status_endpoint_exposes_coco_demo_classes() -
     assert "ROI" in payload["usage_note"]
 
 
+def test_yolo_pose_detection_status_endpoint_is_optional_and_cpu_friendly() -> None:
+    client = make_client()
+
+    response = client.get(
+        "/api/v1/demo/yolo-pose/status?source=0&image_size=256&inference_stride=6"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream_url"].startswith("/api/v1/demo/yolo-pose/stream")
+    assert payload["model_path"] == "yolo11n-pose.pt"
+    assert payload["image_size"] == 256
+    assert payload["inference_stride"] == 6
+    assert "image_size=256" in payload["stream_url"]
+    assert "opcional" in payload["usage_note"]
+    assert "no identifica" in payload["privacy_note"]
+
+
+def test_table_service_status_can_enable_pose_overlay() -> None:
+    client = make_client()
+
+    response = client.get(
+        "/api/v1/demo/table-service/status?source=0&table_id=table_01"
+        "&inference_stride=8&pose_overlay=true"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["stream_url"].startswith("/api/v1/demo/table-service/stream")
+    assert "pose_overlay=true" in payload["stream_url"]
+    assert "inference_stride=8" in payload["stream_url"]
+
+
 def test_table_service_analysis_endpoint_returns_waiting_state_before_stream() -> None:
     client = make_client()
 
