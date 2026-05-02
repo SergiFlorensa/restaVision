@@ -2,6 +2,7 @@
 
 # Módulos opcionales para exploración de audio local
 vosk
+dateparser==1.3.0
 
 # Evaluar solo si aporta al caso de uso
 # pywhispercpp

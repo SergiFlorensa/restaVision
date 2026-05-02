@@ -17,6 +17,26 @@ Mantener el proyecto lo más open source y reutilizable posible.
 - Vosk — Apache-2.0 — https://github.com/alphacep/vosk-api
 - whisper.cpp — MIT — https://github.com/ggml-org/whisper.cpp
 
+## Herramientas candidatas para agente de voz local
+Referencia específica:
+- `docs/07_ejecucion/07_agente_voz_reservas_stack_local.md`
+
+Herramientas alineadas o candidatas:
+- Piper TTS — MIT en el repositorio `rhasspy/piper`; revisar voces/modelos concretos antes de redistribuir — https://github.com/rhasspy/piper
+- Silero VAD — MIT — https://github.com/snakers4/silero-vad
+- Rasa Open Source — Apache-2.0 — https://github.com/RasaHQ/rasa
+- dateparser — BSD — https://dateparser.readthedocs.io/
+- spaCy — MIT; revisar licencia de cada modelo de idioma antes de uso comercial — https://spacy.io/
+- Asterisk — GPL; recomendable solo para integracion telefonica avanzada, no para el MVP — https://docs.asterisk.org/
+
+Decision actual:
+- prototipo primero en navegador, sin telefonia real,
+- Vosk como STT local inicial por streaming y bajo coste,
+- Piper como TTS local inicial,
+- reglas + `dateparser` para intenciones y fechas en el MVP,
+- Rasa/spaCy/Duckling solo si las reglas dejan de ser suficientes,
+- Asterisk como integracion avanzada y opcional, no como requisito del MVP.
+
 ## Decisión de frontend operativo
 Para el dashboard local se adopta Vite + React + TypeScript con CSS propio y `lucide-react`.
 La primera versión evita librerías pesadas de gráficas y renderiza la curva de cola con SVG nativo para reducir bundle y mantener fluidez en portátil básico.

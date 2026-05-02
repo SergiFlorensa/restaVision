@@ -60,6 +60,7 @@ from services.vision.yolo_detector import (
     encode_jpeg,
     is_ultralytics_available,
 )
+from services.voice import VoiceReservationAgent
 
 from apps.api.schemas import (
     AlertResponse,
@@ -88,6 +89,15 @@ from apps.api.schemas import (
     TableServiceAnalysisResponse,
     TableServiceMonitorStatusResponse,
     TableUpsertRequest,
+    VoiceAvailabilityResponse,
+    VoiceCallCreateRequest,
+    VoiceCallResponse,
+    VoiceGatekeeperStatusResponse,
+    VoiceMetricsResponse,
+    VoiceReservationDraftResponse,
+    VoiceReservationResponse,
+    VoiceTurnRequest,
+    VoiceTurnResponse,
     YoloPersonDetectionStatusResponse,
     YoloPoseDetectionStatusResponse,
     YoloRestaurantDetectionStatusResponse,
@@ -115,6 +125,7 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         allow_headers=["*"],
     )
     app.state.mvp_service = mvp_service or build_mvp_service_from_environment()
+    app.state.voice_agent = VoiceReservationAgent(app.state.mvp_service)
     app.state.table_service_analyses = {}
     app.state.table_service_realtime_bus = RealtimeEventBus(max_queue_size=100)
     app.state.table_service_realtime_signatures = {}
@@ -768,6 +779,97 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         return serialize_queue_group(group)
 
+    @app.post(
+        "/api/v1/voice/calls",
+        response_model=VoiceCallResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["voice"],
+    )
+    def create_voice_call(
+        request: Request,
+        payload: VoiceCallCreateRequest,
+    ) -> VoiceCallResponse:
+        voice_agent = get_voice_agent(request)
+        call = voice_agent.start_call(
+            caller_phone=payload.caller_phone,
+            source_channel=payload.source_channel,
+        )
+        return serialize_voice_call(call)
+
+    @app.get(
+        "/api/v1/voice/calls",
+        response_model=list[VoiceCallResponse],
+        tags=["voice"],
+    )
+    def list_voice_calls(request: Request) -> list[VoiceCallResponse]:
+        voice_agent = get_voice_agent(request)
+        return [serialize_voice_call(call) for call in voice_agent.list_calls()]
+
+    @app.get(
+        "/api/v1/voice/calls/{call_id}",
+        response_model=VoiceCallResponse,
+        tags=["voice"],
+    )
+    def get_voice_call(request: Request, call_id: str) -> VoiceCallResponse:
+        voice_agent = get_voice_agent(request)
+        try:
+            call = voice_agent.get_call(call_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_voice_call(call)
+
+    @app.post(
+        "/api/v1/voice/calls/{call_id}/turns",
+        response_model=VoiceTurnResponse,
+        tags=["voice"],
+    )
+    def create_voice_turn(
+        request: Request,
+        call_id: str,
+        payload: VoiceTurnRequest,
+    ) -> VoiceTurnResponse:
+        voice_agent = get_voice_agent(request)
+        try:
+            result = voice_agent.handle_turn(
+                call_id,
+                transcript=payload.transcript,
+                confidence=payload.confidence,
+                observed_at=payload.observed_at,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_voice_turn_result(result)
+
+    @app.get(
+        "/api/v1/voice/reservations",
+        response_model=list[VoiceReservationResponse],
+        tags=["voice"],
+    )
+    def list_voice_reservations(request: Request) -> list[VoiceReservationResponse]:
+        voice_agent = get_voice_agent(request)
+        return [
+            serialize_voice_reservation(reservation)
+            for reservation in voice_agent.list_reservations()
+        ]
+
+    @app.get(
+        "/api/v1/voice/gatekeeper/status",
+        response_model=VoiceGatekeeperStatusResponse,
+        tags=["voice"],
+    )
+    def get_voice_gatekeeper_status(request: Request) -> VoiceGatekeeperStatusResponse:
+        voice_agent = get_voice_agent(request)
+        return serialize_voice_gatekeeper_status(voice_agent.gatekeeper_status())
+
+    @app.get(
+        "/api/v1/voice/metrics",
+        response_model=VoiceMetricsResponse,
+        tags=["voice"],
+    )
+    def get_voice_metrics(request: Request) -> VoiceMetricsResponse:
+        voice_agent = get_voice_agent(request)
+        return serialize_voice_metrics(voice_agent.metrics())
+
     @app.get(
         "/api/v1/decisions/next-best-action",
         response_model=list[DecisionRecommendationResponse],
@@ -953,6 +1055,10 @@ def get_service(request: Request) -> RestaurantMVPService:
     return request.app.state.mvp_service
 
 
+def get_voice_agent(request: Request) -> VoiceReservationAgent:
+    return request.app.state.voice_agent
+
+
 def serialize_table(snapshot: TableSnapshot) -> TableResponse:
     return TableResponse(
         table_id=snapshot.table_id,
@@ -1091,6 +1197,112 @@ def serialize_operational_action(action: OperationalAction) -> OperationalAction
         target_channel=action.target_channel,
         message=action.message,
         payload_json=action.payload_json,
+    )
+
+
+def serialize_voice_call(call: Any) -> VoiceCallResponse:
+    draft = call.reservation_draft
+    return VoiceCallResponse(
+        call_id=call.call_id,
+        started_at=call.started_at,
+        source_channel=call.source_channel,
+        caller_phone=call.caller_phone,
+        status=str(call.status),
+        intent=str(call.intent),
+        scenario_id=call.scenario_id,
+        reservation_draft=VoiceReservationDraftResponse(
+            party_size=draft.party_size,
+            requested_date=draft.requested_date,
+            requested_date_text=draft.requested_date_text,
+            date_parser=draft.date_parser,
+            requested_time_text=draft.requested_time_text,
+            requested_at=draft.requested_at,
+            time_parser=draft.time_parser,
+            customer_name=draft.customer_name,
+            phone=draft.phone,
+            preferred_zone_id=draft.preferred_zone_id,
+        ),
+        reservation_id=call.reservation_id,
+        escalated_reason=call.escalated_reason,
+        ended_at=call.ended_at,
+    )
+
+
+def serialize_voice_reservation(reservation: Any) -> VoiceReservationResponse:
+    return VoiceReservationResponse(
+        reservation_id=reservation.reservation_id,
+        customer_name=reservation.customer_name,
+        phone=reservation.phone,
+        party_size=reservation.party_size,
+        requested_time_text=reservation.requested_time_text,
+        requested_at=reservation.requested_at,
+        table_id=reservation.table_id,
+        status=str(reservation.status),
+        created_at=reservation.created_at,
+        source_call_id=reservation.source_call_id,
+        notes=reservation.notes,
+    )
+
+
+def serialize_voice_availability(availability: Any | None) -> VoiceAvailabilityResponse | None:
+    if availability is None:
+        return None
+    return VoiceAvailabilityResponse(
+        available=availability.available,
+        table_id=availability.table_id,
+        reason=availability.reason,
+        confidence=availability.confidence,
+        pressure_mode=availability.pressure_mode,
+        pressure_reasons=list(availability.pressure_reasons),
+    )
+
+
+def serialize_voice_turn_result(result: Any) -> VoiceTurnResponse:
+    return VoiceTurnResponse(
+        call=serialize_voice_call(result.call),
+        reply_text=result.reply_text,
+        intent=str(result.intent),
+        confidence=result.confidence,
+        action_name=result.action_name,
+        action_payload=result.action_payload,
+        missing_fields=list(result.missing_fields),
+        reservation=(
+            serialize_voice_reservation(result.reservation)
+            if result.reservation is not None
+            else None
+        ),
+        availability=serialize_voice_availability(result.availability),
+        escalated=result.escalated,
+    )
+
+
+def serialize_voice_gatekeeper_status(status: Any) -> VoiceGatekeeperStatusResponse:
+    return VoiceGatekeeperStatusResponse(
+        mode=status.mode,
+        score=status.score,
+        ready_tables=status.ready_tables,
+        total_tables=status.total_tables,
+        waiting_queue_groups=status.waiting_queue_groups,
+        active_reservations=status.active_reservations,
+        reasons=list(status.reasons),
+    )
+
+
+def serialize_voice_metrics(metrics: Any) -> VoiceMetricsResponse:
+    return VoiceMetricsResponse(
+        total_calls=metrics.total_calls,
+        open_calls=metrics.open_calls,
+        confirmed_calls=metrics.confirmed_calls,
+        rejected_calls=metrics.rejected_calls,
+        escalated_calls=metrics.escalated_calls,
+        closed_calls=metrics.closed_calls,
+        total_reservations=metrics.total_reservations,
+        confirmed_reservations=metrics.confirmed_reservations,
+        cancelled_reservations=metrics.cancelled_reservations,
+        auto_resolution_rate=metrics.auto_resolution_rate,
+        escalation_rate=metrics.escalation_rate,
+        average_turns_per_call=metrics.average_turns_per_call,
+        gatekeeper=serialize_voice_gatekeeper_status(metrics.gatekeeper),
     )
 
 

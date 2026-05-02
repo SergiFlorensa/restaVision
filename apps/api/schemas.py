@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -320,3 +320,103 @@ class DecisionFeedbackResponse(BaseModel):
     useful: bool | None
     outcome: dict[str, object]
     comment: str | None
+
+
+class VoiceCallCreateRequest(BaseModel):
+    caller_phone: str | None = None
+    source_channel: str = Field(default="browser_simulator", min_length=1)
+
+
+class VoiceReservationDraftResponse(BaseModel):
+    party_size: int | None
+    requested_date: date | None
+    requested_date_text: str | None
+    date_parser: str | None
+    requested_time_text: str | None
+    requested_at: datetime | None
+    time_parser: str | None
+    customer_name: str | None
+    phone: str | None
+    preferred_zone_id: str | None
+
+
+class VoiceCallResponse(BaseModel):
+    call_id: str
+    started_at: datetime
+    source_channel: str
+    caller_phone: str | None
+    status: str
+    intent: str
+    scenario_id: str | None
+    reservation_draft: VoiceReservationDraftResponse
+    reservation_id: str | None
+    escalated_reason: str | None
+    ended_at: datetime | None
+
+
+class VoiceTurnRequest(BaseModel):
+    transcript: str = Field(min_length=1)
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    observed_at: datetime | None = None
+
+
+class VoiceAvailabilityResponse(BaseModel):
+    available: bool
+    table_id: str | None
+    reason: str
+    confidence: float
+    pressure_mode: str
+    pressure_reasons: list[str]
+
+
+class VoiceReservationResponse(BaseModel):
+    reservation_id: str
+    customer_name: str
+    phone: str
+    party_size: int
+    requested_time_text: str
+    requested_at: datetime | None
+    table_id: str | None
+    status: str
+    created_at: datetime
+    source_call_id: str
+    notes: str | None
+
+
+class VoiceTurnResponse(BaseModel):
+    call: VoiceCallResponse
+    reply_text: str
+    intent: str
+    confidence: float
+    action_name: str
+    action_payload: dict[str, object]
+    missing_fields: list[str]
+    reservation: VoiceReservationResponse | None
+    availability: VoiceAvailabilityResponse | None
+    escalated: bool
+
+
+class VoiceGatekeeperStatusResponse(BaseModel):
+    mode: str
+    score: int
+    ready_tables: int
+    total_tables: int
+    waiting_queue_groups: int
+    active_reservations: int
+    reasons: list[str]
+
+
+class VoiceMetricsResponse(BaseModel):
+    total_calls: int
+    open_calls: int
+    confirmed_calls: int
+    rejected_calls: int
+    escalated_calls: int
+    closed_calls: int
+    total_reservations: int
+    confirmed_reservations: int
+    cancelled_reservations: int
+    auto_resolution_rate: float
+    escalation_rate: float
+    average_turns_per_call: float
+    gatekeeper: VoiceGatekeeperStatusResponse
