@@ -1,5 +1,32 @@
 # Documento maestro de arranque
 
+## Actualizacion de direccion - copiloto operativo
+La direccion vigente del proyecto queda actualizada: RestaurIA no debe plantearse como un dashboard visual ni como una demo de deteccion de objetos. El producto debe actuar como un **copiloto operativo de sala**.
+
+La pregunta central pasa a ser:
+
+```text
+Y ahora que hago?
+```
+
+Por tanto, el MVP debe priorizar:
+- sesiones y eventos persistidos,
+- cola manual asistida,
+- ETA baseline,
+- Promise Engine para esperas,
+- Next Best Action,
+- prioridades P1/P2/P3,
+- Modo Servicio Critico,
+- feedback de recomendaciones.
+
+La vision artificial sigue siendo importante, pero se considera una fuente de evidencia. El valor principal esta en transformar observaciones en acciones claras para el encargado.
+
+Documento rector de esta configuracion:
+
+```text
+docs/01_producto_y_negocio/04_configuracion_operativa_copiloto.md
+```
+
 ## Propósito
 Este documento convierte la documentación existente en un marco de ejecución profesional. Su función es alinear tres horizontes que no deben confundirse:
 - el **TFG** como trabajo académico serio y demostrable,

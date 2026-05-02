@@ -154,6 +154,11 @@ class TableResponse(BaseModel):
     people_count_peak: int
     active_session_id: str | None
     updated_at: datetime | None
+    phase: str
+    needs_attention: bool
+    assigned_staff: str | None
+    last_attention_at: datetime | None
+    operational_note: str | None
 
 
 class TableUpsertRequest(BaseModel):
@@ -226,8 +231,92 @@ class MarkReadyRequest(BaseModel):
     observed_at: datetime | None = None
 
 
+class TableRuntimeUpdateRequest(BaseModel):
+    state: str | None = None
+    phase: str | None = None
+    people_count: int | None = Field(default=None, ge=0)
+    needs_attention: bool | None = None
+    assigned_staff: str | None = None
+    last_attention_at: datetime | None = None
+    operational_note: str | None = None
+
+
+class OperationalActionRequest(BaseModel):
+    action_type: str = Field(min_length=1)
+    table_id: str | None = None
+    queue_group_id: str | None = None
+    assigned_staff: str | None = None
+    target_channel: str = Field(default="shared_panel", min_length=1)
+    message: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+
+
+class OperationalActionResponse(BaseModel):
+    action_id: str
+    ts: datetime
+    action_type: str
+    table_id: str | None
+    queue_group_id: str | None
+    assigned_staff: str | None
+    target_channel: str
+    message: str | None
+    payload_json: dict[str, object]
+
+
 class ObservationResponse(BaseModel):
     table: TableResponse
     session: SessionResponse | None
     events: list[EventResponse]
     prediction: PredictionResponse | None
+
+
+class QueueGroupCreateRequest(BaseModel):
+    party_size: int = Field(gt=0)
+    arrival_ts: datetime | None = None
+    preferred_zone_id: str | None = None
+
+
+class QueueGroupResponse(BaseModel):
+    queue_group_id: str
+    party_size: int
+    arrival_ts: datetime
+    status: str
+    promised_wait_min: int | None
+    promised_wait_max: int | None
+    promised_at: datetime | None
+    preferred_zone_id: str | None
+
+
+class DecisionRecommendationResponse(BaseModel):
+    decision_id: str
+    mode: str
+    priority: str
+    question: str
+    answer: str
+    table_id: str | None
+    queue_group_id: str | None
+    eta_minutes: float | None
+    confidence: float
+    impact: str
+    reason: list[str]
+    expires_in_seconds: int
+    metadata: dict[str, object]
+
+
+class DecisionFeedbackRequest(BaseModel):
+    feedback_type: str = Field(default="manual", min_length=1)
+    accepted: bool
+    useful: bool | None = None
+    outcome: dict[str, object] = Field(default_factory=dict)
+    comment: str | None = None
+
+
+class DecisionFeedbackResponse(BaseModel):
+    feedback_id: str
+    decision_id: str
+    ts: datetime
+    feedback_type: str
+    accepted: bool
+    useful: bool | None
+    outcome: dict[str, object]
+    comment: str | None

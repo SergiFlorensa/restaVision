@@ -25,3 +25,7 @@ export function resolveTableServiceEventsUrl(): string {
   }
   return `${dashboardConfig.apiBaseUrl}/api/v1/demo/table-service/events/stream?table_id=table_01`;
 }
+
+export function apiUrl(path: string): string {
+  return `${dashboardConfig.apiBaseUrl}${path}`;
+}

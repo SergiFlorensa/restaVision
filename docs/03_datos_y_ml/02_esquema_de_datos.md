@@ -1,16 +1,14 @@
 # Esquema de datos
 
+## Objetivo
+La base de datos debe conservar memoria operativa: mesas, sesiones, eventos, cola, predicciones, recomendaciones y feedback.
+
+No debe guardar video continuo, caras, audio conversacional ni datos personales innecesarios.
+
 ## Tabla `cameras`
 - camera_id
 - name
 - status
-
-## Tabla `tables`
-- table_id
-- name
-- capacity
-- zone_id
-- active
 
 ## Tabla `zones`
 - zone_id
@@ -21,6 +19,13 @@
 - roi_bbox
 - active
 
+## Tabla `tables`
+- table_id
+- name
+- capacity
+- zone_id
+- active
+
 ## Tabla `table_runtime`
 - table_id
 - state
@@ -28,6 +33,22 @@
 - people_count_peak
 - active_session_id
 - updated_at
+- phase
+- needs_attention
+- assigned_staff
+- last_attention_at
+- operational_note
+
+## Tabla `operational_actions`
+- action_id
+- ts
+- action_type
+- table_id
+- queue_group_id
+- assigned_staff
+- target_channel
+- message
+- payload_json
 
 ## Tabla `sessions`
 - session_id
@@ -39,12 +60,28 @@
 - final_status
 - duration_seconds
 
+## Tabla `queue_groups`
+- queue_group_id
+- arrival_ts
+- party_size
+- status
+- promised_wait_min
+- promised_wait_max
+- promised_at
+- preferred_zone_id
+- assigned_table_id
+- seated_at
+- abandoned_at
+- notes
+
 ## Tabla `events`
 - event_id
 - ts
 - camera_id
 - zone_id
 - table_id (nullable)
+- session_id (nullable)
+- queue_group_id (nullable)
 - event_type
 - confidence
 - payload_json
@@ -61,30 +98,12 @@
 - confidence
 - explanation
 
-## Estado de implementación
-La primera capa ORM ya cubre:
-- `cameras`,
-- `zones` con `polygon_definition`,
-- `tables`,
-- `table_runtime`,
-- `sessions`,
-- `events`,
-- `predictions`.
-
-Quedan como tablas de fases posteriores:
-- `alerts` si se necesita auditoria persistente de alertas,
-- `model_versions`.
-
-Quedan como ampliaciones de columnas:
-- `zone_type`,
-- `roi_bbox`,
-- `active` en zonas si se necesita desactivar una zona sin borrarla.
-
 ## Tabla `alerts`
 - alert_id
 - ts
 - table_id
 - session_id
+- queue_group_id
 - alert_type
 - severity
 - message
@@ -92,10 +111,42 @@ Quedan como ampliaciones de columnas:
 - evidence_json
 - acknowledged_by
 
-Estado:
-- la primera version de alertas funciona en memoria desde `services/alerts/anomaly.py`,
-- se expone por `GET /api/v1/alerts`,
-- la persistencia queda aplazada hasta que el dashboard necesite historico auditable.
+## Tabla `decision_recommendations`
+- decision_id
+- ts
+- mode
+- priority
+- question
+- answer
+- table_id
+- session_id
+- queue_group_id
+- eta_minutes
+- confidence
+- impact
+- reason_json
+- expires_at
+- status
+
+## Tabla `decision_feedback`
+- feedback_id
+- decision_id
+- ts
+- feedback_type
+- accepted
+- useful
+- outcome_json
+- comment
+
+## Tabla `service_snapshots`
+- snapshot_id
+- ts
+- pressure_index
+- mode
+- occupied_tables
+- waiting_groups
+- p1_alerts
+- payload_json
 
 ## Tabla `model_versions`
 - model_version_id
@@ -104,3 +155,31 @@ Estado:
 - trained_at
 - dataset_ref
 - metrics_json
+
+## Estado de implementacion
+La primera capa ORM ya cubre:
+- `cameras`,
+- `zones` con `polygon_definition`,
+- `tables`,
+- `table_runtime`,
+- `sessions`,
+- `events`,
+- `predictions`.
+- `queue_groups`,
+- `decision_recommendations`,
+- `decision_feedback`,
+- `operational_actions`.
+
+Quedan como tablas prioritarias de la nueva configuracion:
+- `alerts` persistidas,
+- `service_snapshots`.
+
+## Criterio de diseno
+Cada recomendacion debe poder reconstruirse con:
+- estado de mesa,
+- sesion,
+- grupo en cola,
+- eventos recientes,
+- prediccion o ETA,
+- regla aplicada,
+- feedback posterior.

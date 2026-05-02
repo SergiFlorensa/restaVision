@@ -5,13 +5,23 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from services.alerts.anomaly import OperationalAlert, OperationalAnomalyDetector
+from services.decision_engine import NextBestActionEngine
+from services.decision_engine.models import (
+    DecisionFeedback,
+    DecisionRecommendation,
+    QueueGroupSnapshot,
+    ServiceContext,
+)
+from services.decision_engine.models import TableSnapshot as DecisionTableSnapshot
 from services.events.models import (
     CameraStatus,
     DomainEvent,
     EventType,
     ObservationResult,
+    OperationalAction,
     TableDefinition,
     TableObservation,
+    TableOperationalUpdate,
     TablePrediction,
     TableRuntime,
     TableSession,
@@ -50,6 +60,11 @@ class RestaurantMVPService:
         self.events: list[DomainEvent] = []
         self.predictions: list[TablePrediction] = []
         self.alerts: list[OperationalAlert] = []
+        self.operational_actions: list[OperationalAction] = []
+        self.queue_groups: dict[str, QueueGroupSnapshot] = {}
+        self.decision_recommendations: dict[str, DecisionRecommendation] = {}
+        self.decision_feedback: list[DecisionFeedback] = []
+        self.next_best_action_engine = NextBestActionEngine()
         self._emitted_alert_keys: set[tuple[str, str, str]] = set()
         self._load_or_seed_state()
 
@@ -74,6 +89,68 @@ class RestaurantMVPService:
     def list_alerts(self, limit: int = 50) -> list[OperationalAlert]:
         return list(reversed(self.alerts[-limit:]))
 
+    def list_queue_groups(self) -> list[QueueGroupSnapshot]:
+        return sorted(
+            self.queue_groups.values(),
+            key=lambda item: item.arrival_ts,
+            reverse=True,
+        )
+
+    def create_queue_group(
+        self,
+        party_size: int,
+        arrival_ts: datetime,
+        preferred_zone_id: str | None = None,
+    ) -> QueueGroupSnapshot:
+        if preferred_zone_id is not None:
+            self._get_zone(preferred_zone_id)
+        queue_group = QueueGroupSnapshot(
+            queue_group_id=self._new_id("queue_group"),
+            party_size=party_size,
+            arrival_ts=arrival_ts,
+            preferred_zone_id=preferred_zone_id,
+        )
+        self.queue_groups[queue_group.queue_group_id] = queue_group
+        if self.repository is not None:
+            self.repository.save_queue_group(queue_group)
+        return queue_group
+
+    def recommend_next_best_action(self, limit: int = 3) -> list[DecisionRecommendation]:
+        context = self._decision_context(datetime.now(UTC))
+        recommendations = self.next_best_action_engine.recommend_top(context, limit=limit)
+        for recommendation in recommendations:
+            self.decision_recommendations[recommendation.decision_id] = recommendation
+            if self.repository is not None:
+                self.repository.save_decision_recommendation(recommendation, ts=context.now)
+        return recommendations
+
+    def record_decision_feedback(
+        self,
+        decision_id: str,
+        feedback_type: str,
+        accepted: bool,
+        useful: bool | None = None,
+        outcome: dict[str, object] | None = None,
+        comment: str | None = None,
+        ts: datetime | None = None,
+    ) -> DecisionFeedback:
+        if decision_id not in self.decision_recommendations:
+            raise KeyError(f"Unknown decision_id: {decision_id}")
+        feedback = DecisionFeedback(
+            feedback_id=self._new_id("feedback"),
+            decision_id=decision_id,
+            ts=ts or datetime.now(UTC),
+            feedback_type=feedback_type,
+            accepted=accepted,
+            useful=useful,
+            outcome=outcome or {},
+            comment=comment,
+        )
+        self.decision_feedback.append(feedback)
+        if self.repository is not None:
+            self.repository.save_decision_feedback(feedback)
+        return feedback
+
     def get_table_snapshot(self, table_id: str) -> TableSnapshot:
         table = self._get_table(table_id)
         runtime = self.runtime_by_table[table_id]
@@ -87,7 +164,192 @@ class RestaurantMVPService:
             people_count_peak=runtime.people_count_peak,
             active_session_id=runtime.active_session_id,
             updated_at=runtime.updated_at,
+            phase=runtime.phase,
+            needs_attention=runtime.needs_attention,
+            assigned_staff=runtime.assigned_staff,
+            last_attention_at=runtime.last_attention_at,
+            operational_note=runtime.operational_note,
         )
+
+    def update_table_runtime(
+        self,
+        table_id: str,
+        update: TableOperationalUpdate,
+        ts: datetime | None = None,
+    ) -> TableSnapshot:
+        table = self._get_table(table_id)
+        runtime = self.runtime_by_table[table_id]
+        timestamp = ts or datetime.now(UTC)
+        updated_runtime = replace(
+            runtime,
+            state=update.state or runtime.state,
+            last_people_count=(
+                update.people_count
+                if update.people_count is not None
+                else runtime.last_people_count
+            ),
+            people_count_peak=max(
+                runtime.people_count_peak,
+                (
+                    update.people_count
+                    if update.people_count is not None
+                    else runtime.people_count_peak
+                ),
+            ),
+            updated_at=timestamp,
+            phase=update.phase if update.phase is not None else runtime.phase,
+            needs_attention=(
+                update.needs_attention
+                if update.needs_attention is not None
+                else runtime.needs_attention
+            ),
+            assigned_staff=(
+                update.assigned_staff
+                if update.assigned_staff is not None
+                else runtime.assigned_staff
+            ),
+            last_attention_at=(
+                update.last_attention_at
+                if update.last_attention_at is not None
+                else runtime.last_attention_at
+            ),
+            operational_note=(
+                update.operational_note
+                if update.operational_note is not None
+                else runtime.operational_note
+            ),
+        )
+        self.runtime_by_table[table_id] = updated_runtime
+        event = DomainEvent(
+            event_id=self._new_id("evt"),
+            ts=timestamp,
+            camera_id=self.zones[table.zone_id].camera_id,
+            zone_id=table.zone_id,
+            table_id=table.table_id,
+            event_type=EventType.TABLE_STATE_CHANGED,
+            confidence=1.0,
+            payload_json={
+                "source": "manual_operational_update",
+                "state": updated_runtime.state.value,
+                "phase": updated_runtime.phase,
+                "needs_attention": updated_runtime.needs_attention,
+                "assigned_staff": updated_runtime.assigned_staff,
+                "operational_note": updated_runtime.operational_note,
+            },
+        )
+        self.events.append(event)
+        if self.repository is not None:
+            self.repository.save_runtime(updated_runtime)
+            self.repository.save_events([event])
+        return self.get_table_snapshot(table_id)
+
+    def record_operational_action(
+        self,
+        action_type: str,
+        table_id: str | None = None,
+        queue_group_id: str | None = None,
+        assigned_staff: str | None = None,
+        target_channel: str = "shared_panel",
+        message: str | None = None,
+        payload: dict[str, object] | None = None,
+        ts: datetime | None = None,
+    ) -> OperationalAction:
+        timestamp = ts or datetime.now(UTC)
+        if table_id is not None:
+            self._get_table(table_id)
+        if queue_group_id is not None and queue_group_id not in self.queue_groups:
+            raise KeyError(f"Unknown queue_group_id: {queue_group_id}")
+
+        action = OperationalAction(
+            action_id=self._new_id("action"),
+            ts=timestamp,
+            action_type=action_type,
+            table_id=table_id,
+            queue_group_id=queue_group_id,
+            assigned_staff=assigned_staff,
+            target_channel=target_channel,
+            message=message,
+            payload_json=payload or {},
+        )
+        self.operational_actions.append(action)
+        if self.repository is not None:
+            self.repository.save_operational_action(action)
+        if table_id is not None:
+            self._apply_action_to_table(action)
+        return action
+
+    def _apply_action_to_table(self, action: OperationalAction) -> None:
+        if action.table_id is None:
+            return
+        if action.action_type == "mark_needs_attention":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    needs_attention=True,
+                    assigned_staff=action.assigned_staff,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
+        elif action.action_type == "attention_done":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    needs_attention=False,
+                    last_attention_at=action.ts,
+                    assigned_staff=action.assigned_staff,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
+        elif action.action_type == "request_bill":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    state=TableState.PAYMENT,
+                    phase="bill_requested",
+                    assigned_staff=action.assigned_staff,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
+        elif action.action_type == "start_cleaning":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    state=TableState.PENDING_CLEANING,
+                    phase="cleaning",
+                    assigned_staff=action.assigned_staff,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
+        elif action.action_type == "cleaning_done":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    state=TableState.READY,
+                    phase="idle",
+                    people_count=0,
+                    needs_attention=False,
+                    assigned_staff=action.assigned_staff,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
+        elif action.action_type == "seat_group":
+            self.update_table_runtime(
+                action.table_id,
+                TableOperationalUpdate(
+                    state=TableState.OCCUPIED,
+                    phase="seated",
+                    people_count=int(action.payload_json.get("party_size", 0) or 0),
+                    assigned_staff=action.assigned_staff,
+                    last_attention_at=action.ts,
+                    operational_note=action.message,
+                ),
+                ts=action.ts,
+            )
 
     def process_observation(self, observation: TableObservation) -> ObservationResult:
         table = self._get_table(observation.table_id)
@@ -313,6 +575,10 @@ class RestaurantMVPService:
         self.sessions_by_id = persisted_state.sessions_by_id
         self.events = persisted_state.events
         self.predictions = persisted_state.predictions
+        self.queue_groups = persisted_state.queue_groups
+        self.decision_recommendations = persisted_state.decision_recommendations
+        self.decision_feedback = persisted_state.decision_feedback
+        self.operational_actions = persisted_state.operational_actions
 
     def _persist_topology(self) -> None:
         if self.repository is None:
@@ -334,6 +600,41 @@ class RestaurantMVPService:
             return
         self._emitted_alert_keys.add(key)
         self.alerts.append(alert)
+
+    def _decision_context(self, now: datetime) -> ServiceContext:
+        return ServiceContext(
+            now=now,
+            tables=tuple(self._decision_table_snapshot(table_id, now) for table_id in self.tables),
+            queue_groups=tuple(self.queue_groups.values()),
+            p1_alert_count=len(self.alerts),
+        )
+
+    def _decision_table_snapshot(self, table_id: str, now: datetime) -> DecisionTableSnapshot:
+        table = self._get_table(table_id)
+        runtime = self.runtime_by_table[table_id]
+        active_session_minutes = 0.0
+        if runtime.active_session_id is not None:
+            session = self.sessions_by_id.get(runtime.active_session_id)
+            if session is not None:
+                active_session_minutes = max(
+                    0.0,
+                    (now - session.start_ts).total_seconds() / 60,
+                )
+        return DecisionTableSnapshot(
+            table_id=table.table_id,
+            capacity=table.capacity,
+            state=runtime.state.value,
+            active_session_minutes=active_session_minutes,
+            eta_minutes=self._latest_eta_minutes(table.table_id),
+            zone_id=table.zone_id,
+            needs_attention=runtime.needs_attention,
+        )
+
+    def _latest_eta_minutes(self, table_id: str) -> float | None:
+        for prediction in reversed(self.predictions):
+            if prediction.table_id == table_id and prediction.prediction_type == "eta_seconds":
+                return prediction.value / 60
+        return None
 
     def _occlusion_event(
         self,

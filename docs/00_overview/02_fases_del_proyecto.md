@@ -1,76 +1,95 @@
 # Fases del proyecto
 
-## Fase 0 — Preparación
+## Fase 0 - Preparacion
 Objetivo:
 - definir alcance,
 - elegir stack,
 - preparar entorno,
-- fijar arquitectura mínima.
+- fijar arquitectura minima,
+- fijar configuracion de copiloto operativo.
 
 Entregables:
-- documentación base,
+- documentacion base,
 - estructura de repositorio,
 - backlog inicial,
 - plan de datos,
-- plan legal básico.
+- plan legal basico,
+- especificacion de Next Best Action y Promise Engine.
 
-## Fase 1 — Laboratorio doméstico con 1 mesa
+## Fase 1 - Laboratorio domestico con 1 mesa
 Objetivo:
-- demostrar que la cadena completa funciona en pequeño.
+- demostrar que la cadena completa funciona en pequeno.
 
 Capacidades:
-- detección de personas,
+- deteccion o entrada manual de ocupacion,
 - conteo,
 - mesa libre / ocupada,
-- cronómetro por sesión,
+- cronometro por sesion,
 - guardado de eventos.
 
-## Fase 2 — Estados de mesa
+## Fase 2 - Estados de mesa y eventos
 Objetivo:
-- pasar de “veo personas” a “entiendo el ciclo de una mesa”.
+- pasar de "veo personas" a "entiendo el ciclo de una mesa".
 
 Capacidades:
-- estados básicos de mesa,
+- estados basicos de mesa,
 - cambios de fase,
-- tiempo medio por sesión,
+- tiempo medio por sesion,
+- mesa finalizando,
+- mesa pendiente de limpieza,
 - trazabilidad temporal.
 
-## Fase 3 — Predicción
+## Fase 3 - Cola y promesas
 Objetivo:
-- estimar tiempo restante y patrones de finalización.
+- gestionar grupos en espera y comunicar tiempos realistas.
 
 Capacidades:
-- ETA por mesa,
-- estadística por tipo de grupo,
-- primeras reglas de negocio,
-- predicción interpretable.
+- cola manual asistida,
+- compatibilidad mesa-grupo,
+- ETA baseline,
+- Promise Engine,
+- promesa en riesgo.
 
-## Fase 4 — Anomalías y riesgo
+## Fase 4 - Motor de decision
 Objetivo:
-- detectar patrones dudosos o anómalos.
+- convertir estado operativo en recomendaciones accionables.
 
 Capacidades:
-- score de riesgo de impago,
-- salida escalonada,
-- desviaciones temporales,
-- alertas suaves en dashboard.
+- Restaurant Pressure Index,
+- Table Opportunity Score,
+- Next Best Action,
+- prioridades P1/P2/P3,
+- decisiones peligrosas basicas.
 
-## Fase 5 — Piloto pequeño real
+## Fase 5 - Dashboard operativo
 Objetivo:
-- validar con 1–2 mesas o una zona real del restaurante.
+- validar una pantalla util para servicio real.
 
 Capacidades:
-- cámara fija real,
+- accion principal,
+- top 3 acciones,
+- mapa simple de mesas,
+- Modo Servicio Critico,
+- modo tecnico separado.
+
+## Fase 6 - Piloto pequeno real
+Objetivo:
+- validar con 1-2 mesas o una zona real del restaurante.
+
+Capacidades:
+- camara fija real,
 - eventos reales,
 - dashboard estable,
-- recogida de feedback.
+- recogida de feedback,
+- analisis post-servicio basico.
 
-## Fase 6 — Escalado
+## Fase 7 - Escalado
 Objetivo:
-- adaptar el sistema a más cámaras y mesas.
+- adaptar el sistema a mas camaras, mesas e integraciones.
 
 Capacidades:
-- zonas de interés por mesa,
-- arquitectura edge más robusta,
-- monitorización,
-- operación diaria.
+- zonas de interes por mesa,
+- arquitectura edge mas robusta,
+- monitorizacion,
+- integracion con reservas, TPV/POS o KDS,
+- operacion diaria.

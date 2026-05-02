@@ -1,35 +1,43 @@
 import {
+  AlertTriangle,
   Activity,
   Bell,
   Camera,
+  CheckCircle2,
   ClipboardList,
   Clock3,
   Gauge,
+  ListChecks,
   MessageSquareText,
   PlugZap,
+  RefreshCw,
   Settings,
+  Timer,
   Users,
   Utensils,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
+  apiUrl,
   dashboardConfig,
   resolveCameraStreamUrl,
   resolveTableServiceAnalysisUrl,
   resolveTableServiceEventsUrl,
 } from "../config";
-import { metrics, tables } from "../data/dashboard";
+import { tables } from "../data/dashboard";
 import type {
+  ApiTable,
+  DecisionRecommendation,
   DrawerKind,
-  MetricCardData,
+  QueueGroup,
   SectionId,
   TableMapItem,
   TableServiceAnalysis,
 } from "../types";
 import { CameraPanel } from "./CameraPanel";
-import { MetricCard } from "./MetricCard";
+import { CommandCenter } from "./CommandCenter";
 import { QueuePanel } from "./QueuePanel";
 import { TableMap } from "./TableMap";
 
@@ -41,41 +49,364 @@ interface SectionPagesProps {
 
 export function OverviewSection({ onOpenDrawer, onTableSelect }: Omit<SectionPagesProps, "activeSection">) {
   const serviceAnalysis = useTableServiceAnalysis();
-  const overviewMetrics = useMemo(() => buildLiveMetrics(serviceAnalysis), [serviceAnalysis]);
 
   return (
-    <section className="dashboard-grid fade-in">
-      <div className="camera-area">
-        <CameraPanel
-          onOpenSettings={() => onOpenDrawer("camera")}
-          serviceAnalysis={serviceAnalysis}
-          streamUrl={resolveCameraStreamUrl()}
-        />
-      </div>
-
-      <div className="metrics-grid">
-        {overviewMetrics.map((metric) => (
-          <MetricCard
-            key={metric.id}
-            metric={metric}
-            onOpen={() => onOpenDrawer(metric.id === "queue" ? "queue" : "indicators")}
-          />
-        ))}
-      </div>
-
-      <div className="queue-area">
-        <QueuePanel onOpenDetail={() => onOpenDrawer("queue")} />
-      </div>
-
-      <div className="map-area">
-        <TableMap onTableSelect={onTableSelect} serviceAnalysis={serviceAnalysis} />
-      </div>
-
-      <div className="alerts-area">
-        <TableServiceCard analysis={serviceAnalysis} onOpen={() => onOpenDrawer("alerts")} />
-      </div>
+    <section className="command-center-shell fade-in">
+      <CommandCenter
+        analysis={serviceAnalysis}
+        onOpenAlerts={() => onOpenDrawer("alerts")}
+        onOpenTableDetail={onTableSelect}
+        onOpenTechnical={() => onOpenDrawer("camera")}
+      />
     </section>
   );
+}
+
+export function OperationalCommandCenter({ onOpenTechnical }: { onOpenTechnical: () => void }) {
+  const {
+    decisions,
+    error,
+    loading,
+    notice,
+    queueGroups,
+    refresh,
+    registerFeedback,
+    recordOperationalAction,
+    tables: apiTables,
+    createQueueGroup,
+  } = useOperationalCopilot();
+  const primary = decisions[0] ?? null;
+  const pressureMode = primary?.mode ?? inferPressureMode(decisions, queueGroups);
+  const waitingGroups = queueGroups.filter((group) => group.status === "waiting");
+  const readyTables = apiTables.filter((table) => table.state === "ready").length;
+  const focusTable = primary?.table_id
+    ? apiTables.find((table) => table.table_id === primary.table_id)
+    : apiTables[0];
+
+  return (
+    <div className="operation-command">
+      <section className={`panel next-action-card ${priorityClass(primary?.priority)}`}>
+        <div className="operation-eyebrow">
+          <span className={`priority-badge ${priorityClass(primary?.priority)}`}>
+            {primary?.priority ?? "P3"}
+          </span>
+          <span>{modeLabel(pressureMode)}</span>
+          <button className="icon-action" onClick={refresh} title="Actualizar decisiones" type="button">
+            <RefreshCw size={18} />
+          </button>
+        </div>
+
+        <div className="next-action-body">
+          <span className="next-action-label">Accion principal</span>
+          <h2>{primary?.answer ?? "Sin accion critica ahora"}</h2>
+          <p>
+            {primary
+              ? primary.reason.join(" · ")
+              : "El sistema no ve una prioridad urgente. Mantener vigilancia de cola y mesas."}
+          </p>
+        </div>
+
+        <div className="promise-strip">
+          <div>
+            <Timer size={18} />
+            <span>Promesa</span>
+            <strong>{primary?.eta_minutes != null ? `${primary.eta_minutes} min` : "--"}</strong>
+          </div>
+          <div>
+            <Users size={18} />
+            <span>Cola</span>
+            <strong>{waitingGroups.length}</strong>
+          </div>
+          <div>
+            <CheckCircle2 size={18} />
+            <span>Listas</span>
+            <strong>{readyTables}</strong>
+          </div>
+        </div>
+
+        {primary ? (
+          <div className="feedback-actions">
+            <button
+              className="primary-action"
+              onClick={() => registerFeedback(primary.decision_id, true, true)}
+              type="button"
+            >
+              Hecho
+            </button>
+            <button
+              className="ghost-action"
+              onClick={() => registerFeedback(primary.decision_id, false, null)}
+              type="button"
+            >
+              Ignorar
+            </button>
+            <button
+              className="ghost-action"
+              onClick={() => registerFeedback(primary.decision_id, false, false)}
+              type="button"
+            >
+              No util
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel top-actions-panel">
+        <div className="panel-title">
+          <ListChecks size={21} />
+          <h2>Top 3 acciones</h2>
+        </div>
+        <div className="top-action-list">
+          {decisions.length > 0 ? (
+            decisions.slice(0, 3).map((decision, index) => (
+              <article className="top-action-item" key={decision.decision_id}>
+                <span>{index + 1}</span>
+                <div>
+                  <strong>{decision.answer}</strong>
+                  <small>{decision.reason.join(" · ") || decision.impact}</small>
+                </div>
+                <b className={priorityClass(decision.priority)}>{decision.priority}</b>
+              </article>
+            ))
+          ) : (
+            <article className="top-action-item muted">
+              <span>0</span>
+              <div>
+                <strong>Sin acciones pendientes</strong>
+                <small>{loading ? "Calculando..." : "Crea un grupo en cola para probar el flujo."}</small>
+              </div>
+            </article>
+          )}
+        </div>
+      </section>
+
+      <section className="panel queue-command-panel">
+        <div className="panel-title">
+          <Users size={21} />
+          <h2>Cola activa</h2>
+        </div>
+        <div className="quick-party-actions">
+          {[2, 4, 6].map((partySize) => (
+            <button
+              disabled={loading}
+              key={partySize}
+              onClick={() => createQueueGroup(partySize)}
+              type="button"
+            >
+              Grupo {partySize}
+            </button>
+          ))}
+        </div>
+        {notice ? <p className="operation-notice">{notice}</p> : null}
+        <div className="queue-group-list">
+          {waitingGroups.slice(0, 4).map((group) => (
+            <article key={group.queue_group_id}>
+              <strong>Grupo {group.party_size}</strong>
+              <span>{formatQueueWait(group.arrival_ts)}</span>
+            </article>
+          ))}
+          {waitingGroups.length === 0 ? <span className="muted-line">Sin grupos esperando</span> : null}
+        </div>
+      </section>
+
+      <section className="panel operation-status-panel">
+        <div className="panel-title">
+          <Gauge size={21} />
+          <h2>Lectura rapida</h2>
+        </div>
+        <div className="status-rows">
+          <div>
+            <span>Mesas</span>
+            <strong>{apiTables.length}</strong>
+          </div>
+          <div>
+            <span>Ocupadas</span>
+            <strong>{apiTables.filter((table) => table.state !== "ready").length}</strong>
+          </div>
+          <div>
+            <span>Modo</span>
+            <strong>{modeShortLabel(pressureMode)}</strong>
+          </div>
+        </div>
+        {focusTable ? (
+          <div className="table-action-strip">
+            <span>{focusTable.name}</span>
+            <button
+              disabled={loading}
+              onClick={() => recordOperationalAction("mark_needs_attention", focusTable.table_id)}
+              type="button"
+            >
+              Revisar
+            </button>
+            <button
+              disabled={loading}
+              onClick={() => recordOperationalAction("request_bill", focusTable.table_id)}
+              type="button"
+            >
+              Cuenta
+            </button>
+            <button
+              disabled={loading}
+              onClick={() => recordOperationalAction("cleaning_done", focusTable.table_id)}
+              type="button"
+            >
+              Lista
+            </button>
+          </div>
+        ) : null}
+        {error ? (
+          <p className="operation-error">
+            <AlertTriangle size={16} />
+            {error}
+          </p>
+        ) : (
+          <button className="secondary-action" onClick={onOpenTechnical} type="button">
+            Abrir modo tecnico
+          </button>
+        )}
+      </section>
+    </div>
+  );
+}
+
+export function TechnicalSignalPanel({
+  analysis,
+  onOpenAlerts,
+  onOpenCamera,
+}: {
+  analysis: TableServiceAnalysis | null;
+  onOpenAlerts: () => void;
+  onOpenCamera: () => void;
+}) {
+  return (
+    <div className="technical-signal-stack">
+      <section className="compact-camera-panel">
+        <div className="panel-title">
+          <Camera size={21} />
+          <h2>Modo tecnico</h2>
+        </div>
+        <CameraPanel
+          onOpenSettings={onOpenCamera}
+          serviceAnalysis={analysis}
+          streamUrl={resolveCameraStreamUrl()}
+        />
+      </section>
+      <TableServiceCard analysis={analysis} onOpen={onOpenAlerts} />
+    </div>
+  );
+}
+
+function useOperationalCopilot() {
+  const [decisions, setDecisions] = useState<DecisionRecommendation[]>([]);
+  const [queueGroups, setQueueGroups] = useState<QueueGroup[]>([]);
+  const [tables, setTables] = useState<ApiTable[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await fetch(apiUrl(path), {
+      headers: { "Content-Type": "application/json" },
+      ...init,
+    });
+    if (!response.ok) {
+      throw new Error(`API ${response.status}`);
+    }
+    return (await response.json()) as T;
+  }
+
+  async function refresh() {
+    try {
+      setLoading(true);
+      const [nextTables, nextQueueGroups, nextDecisions] = await Promise.all([
+        fetchJson<ApiTable[]>("/api/v1/tables"),
+        fetchJson<QueueGroup[]>("/api/v1/queue/groups"),
+        fetchJson<DecisionRecommendation[]>("/api/v1/decisions/next-best-action?limit=3"),
+      ]);
+      setTables(nextTables);
+      setQueueGroups(nextQueueGroups);
+      setDecisions(nextDecisions);
+      setError(null);
+    } catch {
+      setError("No se pudo conectar con el copiloto operativo.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createQueueGroup(partySize: number) {
+    try {
+      setLoading(true);
+      await fetchJson<QueueGroup>("/api/v1/queue/groups", {
+        method: "POST",
+        body: JSON.stringify({ party_size: partySize }),
+      });
+      await refresh();
+      setNotice(`Grupo de ${partySize} añadido. Recomendacion recalculada.`);
+    } catch {
+      setError("No se pudo crear el grupo en cola.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function registerFeedback(
+    decisionId: string,
+    accepted: boolean,
+    useful: boolean | null,
+  ) {
+    try {
+      await fetchJson(`/api/v1/decisions/${decisionId}/feedback`, {
+        method: "POST",
+        body: JSON.stringify({
+          accepted,
+          feedback_type: "dashboard",
+          useful,
+        }),
+      });
+      await refresh();
+      setNotice(accepted ? "Feedback registrado: accion hecha." : "Feedback registrado.");
+    } catch {
+      setError("No se pudo registrar el feedback.");
+    }
+  }
+
+  async function recordOperationalAction(actionType: string, tableId: string) {
+    try {
+      setLoading(true);
+      await fetchJson("/api/v1/operational-actions", {
+        method: "POST",
+        body: JSON.stringify({
+          action_type: actionType,
+          table_id: tableId,
+          target_channel: "shared_panel",
+        }),
+      });
+      await refresh();
+      setNotice("Accion operativa registrada. Estado de sala actualizado.");
+    } catch {
+      setError("No se pudo registrar la accion operativa.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  return {
+    createQueueGroup,
+    decisions,
+    error,
+    loading,
+    notice,
+    queueGroups,
+    refresh,
+    registerFeedback,
+    recordOperationalAction,
+    tables,
+  };
 }
 
 export function SectionPages({ activeSection, onOpenDrawer, onTableSelect }: SectionPagesProps) {
@@ -450,52 +781,58 @@ function useTableServiceAnalysis(): TableServiceAnalysis | null {
   return analysis;
 }
 
-function buildLiveMetrics(analysis: TableServiceAnalysis | null): MetricCardData[] {
-  if (!analysis) {
-    return metrics;
+function priorityClass(priority?: string): string {
+  if (priority === "P1") {
+    return "priority-p1";
   }
+  if (priority === "P2") {
+    return "priority-p2";
+  }
+  return "priority-p3";
+}
 
-  const occupied = analysis.people_count > 0 ? 1 : 0;
-  const objectTotal = Object.values(analysis.object_counts).reduce(
-    (total, value) => total + value,
-    0,
-  );
-  const activeAlerts = analysis.active_alerts.length;
-  const seatedMinutes = Math.floor((analysis.seat_duration_seconds ?? 0) / 60);
+function modeLabel(mode: string): string {
+  const labels: Record<string, string> = {
+    busy: "Servicio cargado",
+    critical_service: "Servicio critico",
+    normal: "Operacion estable",
+  };
+  return labels[mode] ?? mode;
+}
 
-  return metrics.map((metric) => {
-    if (metric.id === "people") {
-      return {
-        ...metric,
-        helper: `Mesa ${analysis.table_id} · ${analysis.state}`,
-        value: String(analysis.people_count),
-      };
-    }
-    if (metric.id === "occupied") {
-      return {
-        ...metric,
-        helper: `${objectTotal} objetos detectados`,
-        value: `${occupied} / 1`,
-      };
-    }
-    if (metric.id === "time") {
-      return {
-        ...metric,
-        helper: analysis.away_duration_seconds
-          ? `Ausente ${formatDuration(analysis.away_duration_seconds)}`
-          : "Tiempo sentado mesa actual",
-        value: String(seatedMinutes),
-      };
-    }
-    if (metric.id === "queue") {
-      return {
-        ...metric,
-        helper: analysis.timeline_events[0]?.message ?? "Sin alertas de servicio",
-        value: String(activeAlerts),
-      };
-    }
-    return metric;
-  });
+function modeShortLabel(mode: string): string {
+  const labels: Record<string, string> = {
+    busy: "Cargado",
+    critical_service: "Critico",
+    normal: "Normal",
+  };
+  return labels[mode] ?? mode;
+}
+
+function inferPressureMode(
+  decisions: DecisionRecommendation[],
+  queueGroups: QueueGroup[],
+): string {
+  if (decisions.some((decision) => decision.priority === "P1") && queueGroups.length >= 3) {
+    return "critical_service";
+  }
+  if (decisions.length > 0 || queueGroups.length > 0) {
+    return "busy";
+  }
+  return "normal";
+}
+
+function elapsedMinutes(value: string): number {
+  const startedAt = new Date(value).getTime();
+  if (Number.isNaN(startedAt)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((Date.now() - startedAt) / 60000));
+}
+
+function formatQueueWait(value: string): string {
+  const minutes = elapsedMinutes(value);
+  return minutes === 0 ? "esperando ahora" : `${minutes} min esperando`;
 }
 
 function buildTableSummary(analysis: TableServiceAnalysis): string {
@@ -654,10 +991,4 @@ function formatTime(value: string): string {
     return "--:--";
   }
   return date.toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDuration(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return `${minutes}:${String(rest).padStart(2, "0")}`;
 }

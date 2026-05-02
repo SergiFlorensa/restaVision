@@ -14,6 +14,7 @@ repo_root/
       01_problema_y_propuesta_de_valor.md
       02_kpis_y_metricas_de_negocio.md
       03_especificacion_funcional_mvp.md
+      04_configuracion_operativa_copiloto.md
     02_arquitectura/
       01_arquitectura_logica.md
       02_arquitectura_fisica_y_despliegue.md

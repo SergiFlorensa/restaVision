@@ -328,3 +328,90 @@ def test_alert_endpoint_lists_operational_duration_alerts() -> None:
     assert payload[0]["alert_type"] == "long_session_attention"
     assert payload[0]["severity"] == "warning"
     assert payload[0]["evidence_json"]["elapsed_seconds"] == 2700
+
+
+def test_operational_copilot_queue_decision_and_feedback_flow() -> None:
+    client = make_client()
+
+    group = client.post(
+        "/api/v1/queue/groups",
+        json={
+            "party_size": 4,
+            "arrival_ts": "2026-04-13T21:00:00Z",
+        },
+    )
+    assert group.status_code == 201
+    assert group.json()["party_size"] == 4
+    assert group.json()["status"] == "waiting"
+
+    decisions = client.get("/api/v1/decisions/next-best-action")
+    assert decisions.status_code == 200
+    payload = decisions.json()
+    assert len(payload) >= 1
+    assert payload[0]["priority"] in {"P1", "P2"}
+    assert payload[0]["question"] == "Y ahora que hago?"
+
+    feedback = client.post(
+        f"/api/v1/decisions/{payload[0]['decision_id']}/feedback",
+        json={
+            "feedback_type": "manual",
+            "accepted": True,
+            "useful": True,
+            "outcome": {"note": "mesa preparada"},
+        },
+    )
+    assert feedback.status_code == 201
+    assert feedback.json()["decision_id"] == payload[0]["decision_id"]
+    assert feedback.json()["accepted"] is True
+
+
+def test_operational_copilot_feedback_unknown_decision_returns_404() -> None:
+    client = make_client()
+
+    response = client.post(
+        "/api/v1/decisions/dec_missing/feedback",
+        json={"accepted": False},
+    )
+
+    assert response.status_code == 404
+
+
+def test_table_runtime_update_and_operational_action_flow() -> None:
+    client = make_client()
+
+    runtime = client.patch(
+        "/api/v1/tables/table_01/runtime",
+        json={
+            "state": "occupied",
+            "phase": "eating",
+            "people_count": 2,
+            "needs_attention": True,
+            "assigned_staff": "camarero_1",
+            "operational_note": "Mesa pide agua",
+        },
+    )
+    assert runtime.status_code == 200
+    payload = runtime.json()
+    assert payload["state"] == "occupied"
+    assert payload["phase"] == "eating"
+    assert payload["needs_attention"] is True
+    assert payload["assigned_staff"] == "camarero_1"
+
+    action = client.post(
+        "/api/v1/operational-actions",
+        json={
+            "action_type": "attention_done",
+            "table_id": "table_01",
+            "assigned_staff": "camarero_1",
+            "target_channel": "earpiece",
+            "message": "Agua servida",
+        },
+    )
+    assert action.status_code == 201
+    assert action.json()["target_channel"] == "earpiece"
+
+    tables = client.get("/api/v1/tables")
+    assert tables.status_code == 200
+    table = tables.json()[0]
+    assert table["needs_attention"] is False
+    assert table["operational_note"] == "Agua servida"

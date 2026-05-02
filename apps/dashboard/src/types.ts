@@ -103,6 +103,50 @@ export interface TableServiceAnalysis {
   away_duration_seconds: number | null;
 }
 
+export interface ApiTable {
+  table_id: string;
+  name: string;
+  capacity: number;
+  zone_id: string;
+  state: string;
+  people_count: number;
+  people_count_peak: number;
+  active_session_id: string | null;
+  updated_at: string | null;
+  phase: string;
+  needs_attention: boolean;
+  assigned_staff: string | null;
+  last_attention_at: string | null;
+  operational_note: string | null;
+}
+
+export interface QueueGroup {
+  queue_group_id: string;
+  party_size: number;
+  arrival_ts: string;
+  status: string;
+  promised_wait_min: number | null;
+  promised_wait_max: number | null;
+  promised_at: string | null;
+  preferred_zone_id: string | null;
+}
+
+export interface DecisionRecommendation {
+  decision_id: string;
+  mode: string;
+  priority: "P1" | "P2" | "P3" | string;
+  question: string;
+  answer: string;
+  table_id: string | null;
+  queue_group_id: string | null;
+  eta_minutes: number | null;
+  confidence: number;
+  impact: string;
+  reason: string[];
+  expires_in_seconds: number;
+  metadata: Record<string, unknown>;
+}
+
 export interface NavItem {
   id: SectionId;
   label: string;

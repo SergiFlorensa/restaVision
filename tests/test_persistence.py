@@ -6,6 +6,7 @@ from services.events.models import (
     CameraStatus,
     TableDefinition,
     TableObservation,
+    TableOperationalUpdate,
     TableState,
     ZoneDefinition,
 )
@@ -89,3 +90,70 @@ def test_sqlalchemy_repository_persists_editable_topology() -> None:
 
     table_ids = {table.table_id for table in reloaded.list_table_snapshots()}
     assert table_ids >= {"table_01", "table_02"}
+
+
+def test_sqlalchemy_repository_persists_operational_copilot_state() -> None:
+    repository = SqlAlchemyMVPRepository("sqlite+pysqlite:///:memory:")
+    service = RestaurantMVPService(repository=repository)
+    now = datetime(2026, 4, 13, 21, 0, tzinfo=UTC)
+
+    queue_group = service.create_queue_group(party_size=4, arrival_ts=now)
+    recommendations = service.recommend_next_best_action(limit=1)
+    feedback = service.record_decision_feedback(
+        decision_id=recommendations[0].decision_id,
+        feedback_type="manual",
+        accepted=True,
+        useful=True,
+        outcome={"queue_group_id": queue_group.queue_group_id},
+        ts=now + timedelta(minutes=1),
+    )
+
+    reloaded = RestaurantMVPService(repository=repository)
+
+    assert reloaded.list_queue_groups()[0].queue_group_id == queue_group.queue_group_id
+    assert recommendations[0].decision_id in reloaded.decision_recommendations
+    assert reloaded.decision_feedback[0].feedback_id == feedback.feedback_id
+
+
+def test_sqlalchemy_repository_persists_table_operational_runtime() -> None:
+    repository = SqlAlchemyMVPRepository("sqlite+pysqlite:///:memory:")
+    service = RestaurantMVPService(repository=repository)
+
+    service.update_table_runtime(
+        "table_01",
+        TableOperationalUpdate(
+            state=TableState.OCCUPIED,
+            phase="eating",
+            people_count=2,
+            needs_attention=True,
+            assigned_staff="camarero_1",
+            operational_note="Pide agua",
+        ),
+    )
+
+    reloaded = RestaurantMVPService(repository=repository)
+    snapshot = reloaded.get_table_snapshot("table_01")
+
+    assert snapshot.state is TableState.OCCUPIED
+    assert snapshot.phase == "eating"
+    assert snapshot.people_count == 2
+    assert snapshot.needs_attention is True
+    assert snapshot.assigned_staff == "camarero_1"
+
+
+def test_sqlalchemy_repository_persists_operational_actions() -> None:
+    repository = SqlAlchemyMVPRepository("sqlite+pysqlite:///:memory:")
+    service = RestaurantMVPService(repository=repository)
+
+    action = service.record_operational_action(
+        action_type="attention_done",
+        table_id="table_01",
+        assigned_staff="camarero_1",
+        target_channel="earpiece",
+        message="Mesa atendida",
+    )
+
+    reloaded = RestaurantMVPService(repository=repository)
+
+    assert reloaded.operational_actions[0].action_id == action.action_id
+    assert reloaded.operational_actions[0].target_channel == "earpiece"

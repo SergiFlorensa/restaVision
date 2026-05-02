@@ -13,14 +13,22 @@ from sqlalchemy import (
     Integer,
     String,
     create_engine,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
+from services.decision_engine.models import (
+    DecisionFeedback,
+    DecisionRecommendation,
+    QueueGroupSnapshot,
+)
 from services.events.models import (
     CameraStatus,
     DomainEvent,
     EventType,
+    OperationalAction,
     TableDefinition,
     TablePrediction,
     TableRuntime,
@@ -73,6 +81,14 @@ class TableRuntimeRow(Base):
         nullable=True,
     )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    phase: Mapped[str] = mapped_column(String(60), nullable=False, default="idle")
+    needs_attention: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    assigned_staff: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    last_attention_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    operational_note: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
 
 class TableSessionRow(Base):
@@ -116,6 +132,68 @@ class TablePredictionRow(Base):
     explanation: Mapped[str] = mapped_column(String(500), nullable=False)
 
 
+class QueueGroupRow(Base):
+    __tablename__ = "queue_groups"
+
+    queue_group_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    arrival_ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    party_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(40), nullable=False)
+    promised_wait_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    promised_wait_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    promised_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    preferred_zone_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class DecisionRecommendationRow(Base):
+    __tablename__ = "decision_recommendations"
+
+    decision_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    priority: Mapped[str] = mapped_column(String(10), nullable=False)
+    question: Mapped[str] = mapped_column(String(200), nullable=False)
+    answer: Mapped[str] = mapped_column(String(300), nullable=False)
+    table_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    queue_group_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    eta_minutes: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    impact: Mapped[str] = mapped_column(String(80), nullable=False)
+    reason_json: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    expires_in_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class DecisionFeedbackRow(Base):
+    __tablename__ = "decision_feedback"
+
+    feedback_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    decision_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_recommendations.decision_id"),
+        nullable=False,
+    )
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    feedback_type: Mapped[str] = mapped_column(String(60), nullable=False)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    useful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    outcome_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    comment: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+
+class OperationalActionRow(Base):
+    __tablename__ = "operational_actions"
+
+    action_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    table_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    queue_group_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    assigned_staff: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    target_channel: Mapped[str] = mapped_column(String(80), nullable=False)
+    message: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+
+
 @dataclass(slots=True)
 class PersistedMVPState:
     cameras: dict[str, CameraStatus]
@@ -125,6 +203,10 @@ class PersistedMVPState:
     sessions_by_id: dict[str, TableSession]
     events: list[DomainEvent]
     predictions: list[TablePrediction]
+    queue_groups: dict[str, QueueGroupSnapshot]
+    decision_recommendations: dict[str, DecisionRecommendation]
+    decision_feedback: list[DecisionFeedback]
+    operational_actions: list[OperationalAction]
 
     @property
     def has_topology(self) -> bool:
@@ -139,6 +221,33 @@ class SqlAlchemyMVPRepository:
 
     def create_schema(self) -> None:
         Base.metadata.create_all(self.engine)
+        self._ensure_runtime_columns()
+
+    def _ensure_runtime_columns(self) -> None:
+        inspector = inspect(self.engine)
+        if not inspector.has_table("table_runtime"):
+            return
+        existing = {column["name"] for column in inspector.get_columns("table_runtime")}
+        statements = {
+            "phase": (
+                "ALTER TABLE table_runtime ADD COLUMN phase VARCHAR(60) NOT NULL DEFAULT 'idle'"
+            ),
+            "needs_attention": (
+                "ALTER TABLE table_runtime "
+                "ADD COLUMN needs_attention BOOLEAN NOT NULL DEFAULT false"
+            ),
+            "assigned_staff": ("ALTER TABLE table_runtime ADD COLUMN assigned_staff VARCHAR(120)"),
+            "last_attention_at": (
+                "ALTER TABLE table_runtime ADD COLUMN last_attention_at TIMESTAMP"
+            ),
+            "operational_note": (
+                "ALTER TABLE table_runtime ADD COLUMN operational_note VARCHAR(500)"
+            ),
+        }
+        with self.engine.begin() as connection:
+            for column_name, statement in statements.items():
+                if column_name not in existing:
+                    connection.execute(text(statement))
 
     def load_state(self) -> PersistedMVPState:
         with self.session_factory() as session:
@@ -177,6 +286,11 @@ class SqlAlchemyMVPRepository:
                     people_count_peak=row.people_count_peak,
                     active_session_id=row.active_session_id,
                     updated_at=row.updated_at,
+                    phase=row.phase,
+                    needs_attention=row.needs_attention,
+                    assigned_staff=row.assigned_staff,
+                    last_attention_at=row.last_attention_at,
+                    operational_note=row.operational_note,
                 )
                 for row in session.scalars(
                     select(TableRuntimeRow).order_by(TableRuntimeRow.table_id)
@@ -198,6 +312,28 @@ class SqlAlchemyMVPRepository:
                     select(TablePredictionRow).order_by(TablePredictionRow.ts)
                 )
             ]
+            queue_groups = {
+                row.queue_group_id: self._queue_group_from_row(row)
+                for row in session.scalars(select(QueueGroupRow).order_by(QueueGroupRow.arrival_ts))
+            }
+            decision_recommendations = {
+                row.decision_id: self._decision_from_row(row)
+                for row in session.scalars(
+                    select(DecisionRecommendationRow).order_by(DecisionRecommendationRow.ts)
+                )
+            }
+            decision_feedback = [
+                self._feedback_from_row(row)
+                for row in session.scalars(
+                    select(DecisionFeedbackRow).order_by(DecisionFeedbackRow.ts)
+                )
+            ]
+            operational_actions = [
+                self._operational_action_from_row(row)
+                for row in session.scalars(
+                    select(OperationalActionRow).order_by(OperationalActionRow.ts)
+                )
+            ]
 
         for table_id in tables:
             runtime_by_table.setdefault(table_id, TableRuntime(table_id=table_id))
@@ -210,6 +346,10 @@ class SqlAlchemyMVPRepository:
             sessions_by_id=sessions_by_id,
             events=events,
             predictions=predictions,
+            queue_groups=queue_groups,
+            decision_recommendations=decision_recommendations,
+            decision_feedback=decision_feedback,
+            operational_actions=operational_actions,
         )
 
     def save_topology(
@@ -269,6 +409,22 @@ class SqlAlchemyMVPRepository:
         with self.session_factory.begin() as session:
             session.merge(self._prediction_row(prediction))
 
+    def save_queue_group(self, queue_group: QueueGroupSnapshot) -> None:
+        with self.session_factory.begin() as session:
+            session.merge(self._queue_group_row(queue_group))
+
+    def save_decision_recommendation(self, decision: DecisionRecommendation, ts: datetime) -> None:
+        with self.session_factory.begin() as session:
+            session.merge(self._decision_row(decision, ts))
+
+    def save_decision_feedback(self, feedback: DecisionFeedback) -> None:
+        with self.session_factory.begin() as session:
+            session.merge(self._feedback_row(feedback))
+
+    def save_operational_action(self, action: OperationalAction) -> None:
+        with self.session_factory.begin() as session:
+            session.merge(self._operational_action_row(action))
+
     def _runtime_row(self, runtime: TableRuntime) -> TableRuntimeRow:
         return TableRuntimeRow(
             table_id=runtime.table_id,
@@ -277,6 +433,11 @@ class SqlAlchemyMVPRepository:
             people_count_peak=runtime.people_count_peak,
             active_session_id=runtime.active_session_id,
             updated_at=runtime.updated_at,
+            phase=runtime.phase,
+            needs_attention=runtime.needs_attention,
+            assigned_staff=runtime.assigned_staff,
+            last_attention_at=runtime.last_attention_at,
+            operational_note=runtime.operational_note,
         )
 
     def _session_row(self, table_session: TableSession) -> TableSessionRow:
@@ -317,6 +478,65 @@ class SqlAlchemyMVPRepository:
             explanation=prediction.explanation,
         )
 
+    def _queue_group_row(self, queue_group: QueueGroupSnapshot) -> QueueGroupRow:
+        return QueueGroupRow(
+            queue_group_id=queue_group.queue_group_id,
+            arrival_ts=queue_group.arrival_ts,
+            party_size=queue_group.party_size,
+            status=str(queue_group.status),
+            promised_wait_min=queue_group.promised_wait_min,
+            promised_wait_max=queue_group.promised_wait_max,
+            promised_at=queue_group.promised_at,
+            preferred_zone_id=queue_group.preferred_zone_id,
+        )
+
+    def _decision_row(
+        self,
+        decision: DecisionRecommendation,
+        ts: datetime,
+    ) -> DecisionRecommendationRow:
+        return DecisionRecommendationRow(
+            decision_id=decision.decision_id,
+            ts=ts,
+            mode=decision.mode,
+            priority=decision.priority,
+            question=decision.question,
+            answer=decision.answer,
+            table_id=decision.table_id,
+            queue_group_id=decision.queue_group_id,
+            eta_minutes=decision.eta_minutes,
+            confidence=decision.confidence,
+            impact=decision.impact,
+            reason_json=list(decision.reason),
+            expires_in_seconds=decision.expires_in_seconds,
+            metadata_json=decision.metadata,
+        )
+
+    def _feedback_row(self, feedback: DecisionFeedback) -> DecisionFeedbackRow:
+        return DecisionFeedbackRow(
+            feedback_id=feedback.feedback_id,
+            decision_id=feedback.decision_id,
+            ts=feedback.ts,
+            feedback_type=feedback.feedback_type,
+            accepted=feedback.accepted,
+            useful=feedback.useful,
+            outcome_json=feedback.outcome,
+            comment=feedback.comment,
+        )
+
+    def _operational_action_row(self, action: OperationalAction) -> OperationalActionRow:
+        return OperationalActionRow(
+            action_id=action.action_id,
+            ts=action.ts,
+            action_type=action.action_type,
+            table_id=action.table_id,
+            queue_group_id=action.queue_group_id,
+            assigned_staff=action.assigned_staff,
+            target_channel=action.target_channel,
+            message=action.message,
+            payload_json=action.payload_json,
+        )
+
     def _session_from_row(self, row: TableSessionRow) -> TableSession:
         return TableSession(
             session_id=row.session_id,
@@ -353,4 +573,58 @@ class SqlAlchemyMVPRepository:
             upper_bound=row.upper_bound,
             confidence=row.confidence,
             explanation=row.explanation,
+        )
+
+    def _queue_group_from_row(self, row: QueueGroupRow) -> QueueGroupSnapshot:
+        return QueueGroupSnapshot(
+            queue_group_id=row.queue_group_id,
+            arrival_ts=row.arrival_ts,
+            party_size=row.party_size,
+            status=row.status,
+            promised_wait_min=row.promised_wait_min,
+            promised_wait_max=row.promised_wait_max,
+            promised_at=row.promised_at,
+            preferred_zone_id=row.preferred_zone_id,
+        )
+
+    def _decision_from_row(self, row: DecisionRecommendationRow) -> DecisionRecommendation:
+        return DecisionRecommendation(
+            decision_id=row.decision_id,
+            mode=row.mode,
+            priority=row.priority,
+            question=row.question,
+            answer=row.answer,
+            table_id=row.table_id,
+            queue_group_id=row.queue_group_id,
+            eta_minutes=row.eta_minutes,
+            confidence=row.confidence,
+            impact=row.impact,
+            reason=tuple(row.reason_json or ()),
+            expires_in_seconds=row.expires_in_seconds,
+            metadata=row.metadata_json or {},
+        )
+
+    def _feedback_from_row(self, row: DecisionFeedbackRow) -> DecisionFeedback:
+        return DecisionFeedback(
+            feedback_id=row.feedback_id,
+            decision_id=row.decision_id,
+            ts=row.ts,
+            feedback_type=row.feedback_type,
+            accepted=row.accepted,
+            useful=row.useful,
+            outcome=row.outcome_json or {},
+            comment=row.comment,
+        )
+
+    def _operational_action_from_row(self, row: OperationalActionRow) -> OperationalAction:
+        return OperationalAction(
+            action_id=row.action_id,
+            ts=row.ts,
+            action_type=row.action_type,
+            table_id=row.table_id,
+            queue_group_id=row.queue_group_id,
+            assigned_staff=row.assigned_staff,
+            target_channel=row.target_channel,
+            message=row.message,
+            payload_json=row.payload_json or {},
         )

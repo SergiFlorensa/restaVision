@@ -28,6 +28,7 @@ class EventType(StrEnum):
     LOW_CONFIDENCE_OBSERVATION = "low_confidence_observation"
     OCCLUSION_SUSPECTED = "occlusion_suspected"
     CAMERA_BLOCKED = "camera_blocked"
+    OPERATIONAL_ACTION_RECORDED = "operational_action_recorded"
 
 
 @dataclass(slots=True)
@@ -110,6 +111,11 @@ class TableRuntime:
     people_count_peak: int = 0
     active_session_id: str | None = None
     updated_at: datetime | None = None
+    phase: str = "idle"
+    needs_attention: bool = False
+    assigned_staff: str | None = None
+    last_attention_at: datetime | None = None
+    operational_note: str | None = None
 
 
 @dataclass(slots=True)
@@ -123,6 +129,35 @@ class TableSnapshot:
     people_count_peak: int
     active_session_id: str | None
     updated_at: datetime | None
+    phase: str
+    needs_attention: bool
+    assigned_staff: str | None
+    last_attention_at: datetime | None
+    operational_note: str | None
+
+
+@dataclass(slots=True)
+class TableOperationalUpdate:
+    state: TableState | None = None
+    phase: str | None = None
+    people_count: int | None = None
+    needs_attention: bool | None = None
+    assigned_staff: str | None = None
+    last_attention_at: datetime | None = None
+    operational_note: str | None = None
+
+
+@dataclass(slots=True)
+class OperationalAction:
+    action_id: str
+    ts: datetime
+    action_type: str
+    table_id: str | None = None
+    queue_group_id: str | None = None
+    assigned_staff: str | None = None
+    target_channel: str = "shared_panel"
+    message: str | None = None
+    payload_json: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

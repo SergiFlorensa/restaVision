@@ -1,95 +1,114 @@
 # Backlog inicial
 
-## Épica 1 — Captura
+## Epica 1 - Captura y observacion
 - [ ] Conectar webcam
 - [ ] Capturar stream estable
 - [ ] Guardar clips de prueba
+- [ ] Permitir entrada manual alternativa de ocupacion para pruebas sin camara
 
-## Épica 2 — Detección
+## Epica 2 - Deteccion
 - [ ] Detectar personas
 - [ ] Contar personas
-- [ ] Dibujar bounding boxes
+- [ ] Dibujar bounding boxes en modo tecnico
+- [ ] Convertir detecciones a observaciones de dominio
 
-## Épica 2.1 — Geometría de visión
+## Epica 2.1 - Geometria de vision
 - [x] Implementar bounding boxes e IoU
-- [x] Implementar asignación detección-zona por IoU
-- [x] Implementar asignación por punto inferior central
-- [x] Implementar NMS básico
-- [x] Añadir suavizado Kalman de bounding boxes
-- [x] Integrar geometría en adaptador detección-a-observación
-- [x] Añadir suavizado temporal de conteo
+- [x] Implementar asignacion deteccion-zona por IoU
+- [x] Implementar asignacion por punto inferior central
+- [x] Implementar NMS basico
+- [x] Anadir suavizado Kalman de bounding boxes
+- [x] Integrar geometria en adaptador deteccion-a-observacion
+- [x] Anadir suavizado temporal de conteo
 - [ ] Conectar adaptador a captura OpenCV real
 
-## Épica 2.2 — Pipeline cámara única
-- [ ] Capturar frames con OpenCV
-- [ ] Ejecutar detector ligero de personas
-- [ ] Convertir detecciones a `ScoredDetection`
-- [ ] Generar `TableObservation` automáticamente
-- [ ] Enviar observaciones al motor de eventos
-- [ ] Calibrar coordenadas de suelo para medir metros reales
-
-## Épica 2.3 — Proxémica operativa
-- [x] Clasificar distancias en bandas proxémicas
-- [x] Calcular contactos staff-mesa
-- [x] Calcular densidad operativa por zona
-- [x] Generar avisos de voz prudentes
-- [x] Limitar repetición de avisos por cooldown
-- [ ] Integrar métricas proxémicas con dashboard tras calibrar cámara
-
-## Épica 3 — Lógica de mesa
+## Epica 3 - Logica de mesa
 - [ ] Definir zona de mesa
-- [ ] Marcar libre / ocupada
+- [ ] Marcar `ready` / `occupied`
+- [ ] Detectar `finalizing`
+- [ ] Detectar `pending_cleaning`
+- [ ] Detectar `blocked`
+- [ ] Detectar `needs_attention`
 - [ ] Iniciar y cerrar sesiones
 - [x] Rechazar transiciones de baja confianza
 - [x] Registrar evento `low_confidence_observation`
 
-## Épica 4 — Datos
-- [x] Añadir repositorio SQLAlchemy opcional
+## Epica 4 - Datos
+- [x] Anadir repositorio SQLAlchemy opcional
 - [x] Persistir eventos con ORM
 - [x] Persistir sesiones con ORM
 - [x] Persistir predicciones con ORM
 - [ ] Validar `ENABLE_POSTGRES=true` contra PostgreSQL local
-- [ ] Exportar CSV de análisis
+- [ ] Persistir `queue_groups`
+- [ ] Persistir `decision_recommendations`
+- [ ] Persistir `decision_feedback`
+- [ ] Persistir alertas P1/P2 si el dashboard necesita historico auditable
+- [ ] Exportar CSV de analisis
 
-## Épica 4.1 — Configuración operativa
-- [x] Crear cámaras desde API
+## Epica 4.1 - Configuracion operativa
+- [x] Crear camaras desde API
 - [x] Crear zonas desde API
 - [x] Crear mesas desde API
-- [x] Persistir geometría de zona
-- [x] Validar capacidad y asociación mesa-zona
+- [x] Persistir geometria de zona
+- [x] Validar capacidad y asociacion mesa-zona
+- [ ] Configurar capacidades utiles para compatibilidad mesa-grupo
+- [ ] Configurar modo de servicio: normal, busy, critical_service
 
-## Épica 5 — Dashboard
-- [ ] Mostrar estado actual
-- [ ] Mostrar tiempo transcurrido
-- [ ] Mostrar historial simple
+## Epica 5 - Cola manual asistida
+- [ ] Crear grupo en cola con tamano y hora de llegada
+- [ ] Editar promesa de espera
+- [ ] Asociar grupo a mesa candidata
+- [ ] Marcar grupo sentado
+- [ ] Marcar abandono de cola
+- [ ] Calcular espera real
 
-## Épica 6 — Predicción
-- [ ] Media por sesión
+## Epica 6 - Prediccion y promesa
+- [ ] Media por sesion
 - [ ] ETA baseline
 - [ ] Intervalo de confianza simple
-- [x] Añadir PCA y whitening para features tabulares
-- [x] Añadir estadísticos suficientes incrementales
-- [x] Añadir matriz de correlación robusta
+- [ ] Promise Engine inicial
+- [ ] Detectar promesa en riesgo
+- [x] Anadir PCA y whitening para features tabulares
+- [x] Anadir estadisticos suficientes incrementales
+- [x] Anadir matriz de correlacion robusta
 - [ ] Aplicar estas features a un dataset real de sesiones
 
-## Épica 7 — Riesgo
+## Epica 7 - Motor de decision
 - [x] Crear detector estadistico ligero para sesiones largas
 - [x] Exponer alertas operativas desde la API
 - [x] Evitar duplicar alertas de la misma sesion
 - [x] Crear matriz de perdida reutilizable para decisiones
 - [x] Implementar opcion de rechazo por confianza
 - [x] Crear comite ponderado de posteriores
-- [ ] Persistir alertas si el dashboard lo necesita
-- [ ] Medir falsos positivos con pruebas controladas
-- [ ] Detectar salida escalonada solo como senal operativa
-- [ ] Detectar falta de senal de cierre
-- [ ] Score simple de anomalia por franja horaria
-- [ ] Validar que las senales proxemicas no generan alertas invasivas
+- [ ] Crear `services/decision_engine/pressure_index.py`
+- [ ] Crear `services/decision_engine/table_opportunity_score.py`
+- [ ] Crear `services/decision_engine/promise_engine.py`
+- [ ] Crear `services/decision_engine/next_best_action.py`
+- [ ] Crear `services/decision_engine/decision_explainer.py`
+- [ ] Crear `services/decision_engine/feedback_recorder.py`
+- [ ] Endpoint `GET /api/v1/decisions/next-best-action`
+- [ ] Endpoint `POST /api/v1/decisions/{id}/feedback`
 
-## Épica 8 — María local (multimodal)
+## Epica 8 - Dashboard operativo
+- [ ] Mostrar accion principal
+- [ ] Mostrar top 3 acciones
+- [ ] Mostrar promesa de espera recomendada
+- [ ] Mostrar mapa simple de mesas
+- [ ] Mostrar solo P1/P2 en modo servicio
+- [ ] Crear Modo Servicio Critico
+- [ ] Mantener modo tecnico separado para depuracion visual
+
+## Epica 9 - Analisis post-servicio
+- [ ] Resumen de picos de presion
+- [ ] Mesas bloqueadas
+- [ ] Promesas incumplidas
+- [ ] Tiempo medio de primera atencion
+- [ ] Recomendaciones para el siguiente servicio
+
+## Epica 10 - Maria local (multimodal)
 - [x] Parser de instrucciones naturales a intents operativos
 - [x] Orquestador de triggers con cooldown por motivo
 - [x] Prompts operativos acotados por tipo de trigger
-- [ ] Conectar orquestador a capturas reales de cámara
+- [ ] Conectar orquestador a recomendaciones del motor de decision
 - [ ] Integrar con modelo local cuantizado (Ollama/GGUF)
-- [ ] Medir latencia, RAM y tasa de activación de análisis pesado
+- [ ] Medir latencia, RAM y tasa de activacion de analisis pesado

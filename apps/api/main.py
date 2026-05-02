@@ -18,11 +18,14 @@ from services.alerts.anomaly import OperationalAlert
 from services.events.models import (
     CameraStatus,
     DomainEvent,
+    OperationalAction,
     TableDefinition,
     TableObservation,
+    TableOperationalUpdate,
     TablePrediction,
     TableSession,
     TableSnapshot,
+    TableState,
     ZoneDefinition,
 )
 from services.events.persistence import SqlAlchemyMVPRepository
@@ -63,17 +66,25 @@ from apps.api.schemas import (
     CameraResponse,
     CameraSnapshotResponse,
     CameraUpsertRequest,
+    DecisionFeedbackRequest,
+    DecisionFeedbackResponse,
+    DecisionRecommendationResponse,
     DemoPersonDetectionStatusResponse,
     EventResponse,
     HealthResponse,
     MarkReadyRequest,
     ObservationRequest,
     ObservationResponse,
+    OperationalActionRequest,
+    OperationalActionResponse,
     PredictionResponse,
+    QueueGroupCreateRequest,
+    QueueGroupResponse,
     ServiceAlertResponse,
     ServiceTimelineEventResponse,
     SessionResponse,
     TableResponse,
+    TableRuntimeUpdateRequest,
     TableServiceAnalysisResponse,
     TableServiceMonitorStatusResponse,
     TableUpsertRequest,
@@ -99,7 +110,8 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             "http://localhost:5173",
             "http://localhost:4173",
         ],
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
         allow_headers=["*"],
     )
     app.state.mvp_service = mvp_service or build_mvp_service_from_environment()
@@ -653,6 +665,61 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
         return serialize_table(table)
 
+    @app.patch("/api/v1/tables/{table_id}/runtime", response_model=TableResponse, tags=["state"])
+    def update_table_runtime(
+        request: Request,
+        table_id: str,
+        payload: TableRuntimeUpdateRequest,
+    ) -> TableResponse:
+        service = get_service(request)
+        try:
+            state = TableState(payload.state) if payload.state is not None else None
+            snapshot = service.update_table_runtime(
+                table_id,
+                TableOperationalUpdate(
+                    state=state,
+                    phase=payload.phase,
+                    people_count=payload.people_count,
+                    needs_attention=payload.needs_attention,
+                    assigned_staff=payload.assigned_staff,
+                    last_attention_at=payload.last_attention_at,
+                    operational_note=payload.operational_note,
+                ),
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_table(snapshot)
+
+    @app.post(
+        "/api/v1/operational-actions",
+        response_model=OperationalActionResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["operations"],
+    )
+    def record_operational_action(
+        request: Request,
+        payload: OperationalActionRequest,
+    ) -> OperationalActionResponse:
+        service = get_service(request)
+        try:
+            action = service.record_operational_action(
+                action_type=payload.action_type,
+                table_id=payload.table_id,
+                queue_group_id=payload.queue_group_id,
+                assigned_staff=payload.assigned_staff,
+                target_channel=payload.target_channel,
+                message=payload.message,
+                payload=payload.payload,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_operational_action(action)
+
     @app.get("/api/v1/sessions", response_model=list[SessionResponse], tags=["state"])
     def list_sessions(request: Request) -> list[SessionResponse]:
         service = get_service(request)
@@ -674,6 +741,72 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
     def list_alerts(request: Request, limit: int = 50) -> list[AlertResponse]:
         service = get_service(request)
         return [serialize_alert(alert) for alert in service.list_alerts(limit=limit)]
+
+    @app.get("/api/v1/queue/groups", response_model=list[QueueGroupResponse], tags=["queue"])
+    def list_queue_groups(request: Request) -> list[QueueGroupResponse]:
+        service = get_service(request)
+        return [serialize_queue_group(group) for group in service.list_queue_groups()]
+
+    @app.post(
+        "/api/v1/queue/groups",
+        response_model=QueueGroupResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["queue"],
+    )
+    def create_queue_group(
+        request: Request,
+        payload: QueueGroupCreateRequest,
+    ) -> QueueGroupResponse:
+        service = get_service(request)
+        try:
+            group = service.create_queue_group(
+                party_size=payload.party_size,
+                arrival_ts=payload.arrival_ts or datetime.now(UTC),
+                preferred_zone_id=payload.preferred_zone_id,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_queue_group(group)
+
+    @app.get(
+        "/api/v1/decisions/next-best-action",
+        response_model=list[DecisionRecommendationResponse],
+        tags=["decisions"],
+    )
+    def next_best_action(
+        request: Request,
+        limit: int = Query(default=3, ge=1, le=10),
+    ) -> list[DecisionRecommendationResponse]:
+        service = get_service(request)
+        return [
+            serialize_decision_recommendation(recommendation)
+            for recommendation in service.recommend_next_best_action(limit=limit)
+        ]
+
+    @app.post(
+        "/api/v1/decisions/{decision_id}/feedback",
+        response_model=DecisionFeedbackResponse,
+        status_code=status.HTTP_201_CREATED,
+        tags=["decisions"],
+    )
+    def record_decision_feedback(
+        request: Request,
+        decision_id: str,
+        payload: DecisionFeedbackRequest,
+    ) -> DecisionFeedbackResponse:
+        service = get_service(request)
+        try:
+            feedback = service.record_decision_feedback(
+                decision_id=decision_id,
+                feedback_type=payload.feedback_type,
+                accepted=payload.accepted,
+                useful=payload.useful,
+                outcome=payload.outcome,
+                comment=payload.comment,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_decision_feedback(feedback)
 
     @app.post(
         "/api/v1/observations",
@@ -831,6 +964,11 @@ def serialize_table(snapshot: TableSnapshot) -> TableResponse:
         people_count_peak=snapshot.people_count_peak,
         active_session_id=snapshot.active_session_id,
         updated_at=snapshot.updated_at,
+        phase=snapshot.phase,
+        needs_attention=snapshot.needs_attention,
+        assigned_staff=snapshot.assigned_staff,
+        last_attention_at=snapshot.last_attention_at,
+        operational_note=snapshot.operational_note,
     )
 
 
@@ -895,6 +1033,64 @@ def serialize_alert(alert: OperationalAlert) -> AlertResponse:
         message=alert.message,
         score=alert.score,
         evidence_json=alert.evidence_json,
+    )
+
+
+def serialize_queue_group(group: Any) -> QueueGroupResponse:
+    return QueueGroupResponse(
+        queue_group_id=group.queue_group_id,
+        party_size=group.party_size,
+        arrival_ts=group.arrival_ts,
+        status=str(group.status),
+        promised_wait_min=group.promised_wait_min,
+        promised_wait_max=group.promised_wait_max,
+        promised_at=group.promised_at,
+        preferred_zone_id=group.preferred_zone_id,
+    )
+
+
+def serialize_decision_recommendation(recommendation: Any) -> DecisionRecommendationResponse:
+    return DecisionRecommendationResponse(
+        decision_id=recommendation.decision_id,
+        mode=recommendation.mode,
+        priority=recommendation.priority,
+        question=recommendation.question,
+        answer=recommendation.answer,
+        table_id=recommendation.table_id,
+        queue_group_id=recommendation.queue_group_id,
+        eta_minutes=recommendation.eta_minutes,
+        confidence=recommendation.confidence,
+        impact=recommendation.impact,
+        reason=list(recommendation.reason),
+        expires_in_seconds=recommendation.expires_in_seconds,
+        metadata=recommendation.metadata,
+    )
+
+
+def serialize_decision_feedback(feedback: Any) -> DecisionFeedbackResponse:
+    return DecisionFeedbackResponse(
+        feedback_id=feedback.feedback_id,
+        decision_id=feedback.decision_id,
+        ts=feedback.ts,
+        feedback_type=feedback.feedback_type,
+        accepted=feedback.accepted,
+        useful=feedback.useful,
+        outcome=feedback.outcome,
+        comment=feedback.comment,
+    )
+
+
+def serialize_operational_action(action: OperationalAction) -> OperationalActionResponse:
+    return OperationalActionResponse(
+        action_id=action.action_id,
+        ts=action.ts,
+        action_type=action.action_type,
+        table_id=action.table_id,
+        queue_group_id=action.queue_group_id,
+        assigned_staff=action.assigned_staff,
+        target_channel=action.target_channel,
+        message=action.message,
+        payload_json=action.payload_json,
     )
 
 
