@@ -22,7 +22,12 @@ Referencia específica:
 - `docs/07_ejecucion/07_agente_voz_reservas_stack_local.md`
 
 Herramientas alineadas o candidatas:
-- Piper TTS — MIT en el repositorio `rhasspy/piper`; revisar voces/modelos concretos antes de redistribuir — https://github.com/rhasspy/piper
+- Piper TTS — motor local para voces `es_ES`. El paquete Python `piper-tts==1.4.2`
+  instalado para Windows declara `GPL-3.0-or-later`; válido para TFG/demo local,
+  pero antes de vender conviene revisar sustitución por binario/paquete con licencia
+  adecuada o aislarlo como componente opcional. Las voces `rhasspy/piper-voices`
+  deben revisarse por modelo antes de redistribuir — https://github.com/OHF-voice/piper1-gpl
+- Kokoro ONNX — wrapper MIT y modelo Kokoro Apache-2.0; usar como TTS avanzado opcional local, con modelos en `models/checkpoints/` sin versionar — https://github.com/thewh1teagle/kokoro-onnx
 - Silero VAD — MIT — https://github.com/snakers4/silero-vad
 - Rasa Open Source — Apache-2.0 — https://github.com/RasaHQ/rasa
 - dateparser — BSD — https://dateparser.readthedocs.io/
@@ -32,7 +37,7 @@ Herramientas alineadas o candidatas:
 Decision actual:
 - prototipo primero en navegador, sin telefonia real,
 - Vosk como STT local inicial por streaming y bajo coste,
-- Piper como TTS local inicial,
+- Windows SAPI/Piper como fallback TTS local inicial y Kokoro ONNX como TTS avanzado para demo natural en CPU,
 - reglas + `dateparser` para intenciones y fechas en el MVP,
 - Rasa/spaCy/Duckling solo si las reglas dejan de ser suficientes,
 - Asterisk como integracion avanzada y opcional, no como requisito del MVP.

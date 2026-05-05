@@ -73,7 +73,19 @@ CALL_SCENARIOS: tuple[VoiceScenario, ...] = (
         scenario_id="opening_hours",
         intent=VoiceIntent.INFORMATION_REQUEST,
         label="Horario o cocina abierta",
-        keywords=("horario", "abris", "abren", "cerrais", "cierran", "cocina abierta"),
+        keywords=(
+            "horario",
+            "abris",
+            "abren",
+            "abierta",
+            "abierto",
+            "cerrais",
+            "cierran",
+            "cocina abierta",
+            "hora esta abierta",
+            "hora esta abierto",
+            "hasta que hora",
+        ),
         reply_text=(
             "Para no darle un horario incorrecto, le paso con el encargado "
             "o puedo tomar una solicitud de reserva."

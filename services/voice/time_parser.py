@@ -171,7 +171,8 @@ def _parse_manual_spanish_time(
     time_match = re.search(r"\b([01]?\d|2[0-3])(?::|\.|h)(\d{2})\b", text)
     if not time_match:
         time_match = re.search(
-            r"\b(?:a las|sobre las|para las)\s+([01]?\d|2[0-3])\b",
+            r"\b(?:a las|a los|a la|sobre las|sobre los|para las|para los)\s+"
+            r"([01]?\d|2[0-3])\b",
             text,
         )
     if time_match:
@@ -179,7 +180,7 @@ def _parse_manual_spanish_time(
         minute = int(time_match.group(2) or 0)
     else:
         word_match = re.search(
-            r"\b(?:a las|sobre las|para las)\s+"
+            r"\b(?:a las|a los|a la|sobre las|sobre los|para las|para los)\s+"
             r"(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|"
             r"trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|"
             r"veinte|veintiuna|veintiuno|veintidos|veintitres)"
@@ -288,9 +289,13 @@ def _has_explicit_time_signal(text: str) -> bool:
     text = _normalize_spanish_text(text)
     return bool(
         re.search(r"\b([01]?\d|2[0-3])(?::|\.|h)(\d{2})\b", text)
-        or re.search(r"\b(?:a las|sobre las|para las)\s+([01]?\d|2[0-3])\b", text)
         or re.search(
-            r"\b(?:a las|sobre las|para las)\s+"
+            r"\b(?:a las|a los|a la|sobre las|sobre los|para las|para los)\s+"
+            r"([01]?\d|2[0-3])\b",
+            text,
+        )
+        or re.search(
+            r"\b(?:a las|a los|a la|sobre las|sobre los|para las|para los)\s+"
             r"(una|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|"
             r"trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|"
             r"veinte|veintiuna|veintiuno|veintidos|veintitres)\b",

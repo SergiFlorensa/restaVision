@@ -1,0 +1,39 @@
+[
+  {
+    "case_id": "reserva_completa_01",
+    "wav_path": "data/local_samples/reserva_completa_01.wav",
+    "expected_transcript": "Reserva para 2 a las 20:00 a nombre de Lara telefono 600111222",
+    "expected_intent": "create_reservation",
+    "expected_action_name": "action_confirm_reservation",
+    "expected_slots": {
+      "party_size": 2,
+      "customer_name": "Lara",
+      "phone": "600111222"
+    }
+  },
+  {
+    "case_id": "cancelacion_01",
+    "wav_path": "data/local_samples/cancelacion_01.wav",
+    "expected_transcript": "Quiero cancelar mi reserva telefono 600111222",
+    "expected_intent": "cancel_reservation",
+    "expected_action_name": "action_escalate_to_manager"
+  },
+  {
+    "case_id": "alergia_01",
+    "wav_path": "data/local_samples/alergia_01.wav",
+    "expected_transcript": "Queria reservar mesa para 2 a las 21:00 soy celiaco",
+    "expected_intent": "special_request",
+    "expected_action_name": "action_escalate_to_manager"
+  },
+  {
+    "case_id": "horario_01",
+    "wav_path": "data/local_samples/horario_01.wav",
+    "expected_transcript": "Hola queria saber el horario de cocina",
+    "expected_intent": "information_request",
+    "expected_action_name": "action_escalate_to_manager"
+  },
+  {
+    "case_id": "silencio_01",
+    "wav_path": "data/local_samples/silencio_01.wav"
+  }
+]

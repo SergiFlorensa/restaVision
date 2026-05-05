@@ -44,6 +44,9 @@ class ReservationDraft:
     requested_at: datetime | None = None
     time_parser: str | None = None
     customer_name: str | None = None
+    customer_name_confirmed: bool = False
+    customer_name_confirmation_attempts: int = 0
+    customer_name_spelling_requested: bool = False
     phone: str | None = None
     preferred_zone_id: str | None = None
 

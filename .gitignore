@@ -58,6 +58,11 @@ data/annotations/*
 !data/annotations/.gitkeep
 data/calibration/snapshots/*
 !data/calibration/snapshots/.gitkeep
+data/local_samples/*.wav
+data/local_samples/*.m4a
+data/local_samples/**/*.wav
+data/local_samples/**/*.m4a
+data/local_samples/manifest.local.json
 models/checkpoints/*
 !models/checkpoints/.gitkeep
 models/exported/*

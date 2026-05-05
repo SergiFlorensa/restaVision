@@ -60,7 +60,12 @@ from services.vision.yolo_detector import (
     encode_jpeg,
     is_ultralytics_available,
 )
-from services.voice import VoiceReservationAgent
+from services.voice import VoiceReservationAgent, evaluate_voice_agent_baseline
+from services.voice.audio_quality import (
+    evaluate_transcript_quality,
+    read_pcm16_wav,
+    simple_energy_vad,
+)
 
 from apps.api.schemas import (
     AlertResponse,
@@ -89,15 +94,24 @@ from apps.api.schemas import (
     TableServiceAnalysisResponse,
     TableServiceMonitorStatusResponse,
     TableUpsertRequest,
+    VoiceAudioBufferResponse,
+    VoiceAudioQualityRequest,
+    VoiceAudioQualityResponse,
     VoiceAvailabilityResponse,
     VoiceCallCreateRequest,
     VoiceCallResponse,
+    VoiceEvaluationCaseResponse,
+    VoiceEvaluationClassMetricsResponse,
+    VoiceEvaluationReportResponse,
     VoiceGatekeeperStatusResponse,
     VoiceMetricsResponse,
     VoiceReservationDraftResponse,
     VoiceReservationResponse,
+    VoiceTranscriptQualityResponse,
     VoiceTurnRequest,
     VoiceTurnResponse,
+    VoiceVadResponse,
+    VoiceVadSegmentResponse,
     YoloPersonDetectionStatusResponse,
     YoloPoseDetectionStatusResponse,
     YoloRestaurantDetectionStatusResponse,
@@ -871,6 +885,42 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         return serialize_voice_metrics(voice_agent.metrics())
 
     @app.get(
+        "/api/v1/voice/evaluation/baseline",
+        response_model=VoiceEvaluationReportResponse,
+        tags=["voice"],
+    )
+    def evaluate_voice_baseline() -> VoiceEvaluationReportResponse:
+        report = evaluate_voice_agent_baseline()
+        return serialize_voice_evaluation_report(report)
+
+    @app.post(
+        "/api/v1/voice/audio/quality",
+        response_model=VoiceAudioQualityResponse,
+        tags=["voice"],
+    )
+    def evaluate_voice_audio_quality(
+        payload: VoiceAudioQualityRequest,
+    ) -> VoiceAudioQualityResponse:
+        try:
+            read_result = read_pcm16_wav(payload.wav_path)
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        vad = simple_energy_vad(read_result.audio, read_result.samples)
+        transcript_quality = (
+            evaluate_transcript_quality(
+                payload.transcript,
+                confidence=payload.confidence,
+                reference_text=payload.reference_text,
+            )
+            if payload.transcript is not None
+            else None
+        )
+        return serialize_voice_audio_quality(read_result.audio, vad, transcript_quality)
+
+    @app.get(
         "/api/v1/decisions/next-best-action",
         response_model=list[DecisionRecommendationResponse],
         tags=["decisions"],
@@ -1303,6 +1353,132 @@ def serialize_voice_metrics(metrics: Any) -> VoiceMetricsResponse:
         escalation_rate=metrics.escalation_rate,
         average_turns_per_call=metrics.average_turns_per_call,
         gatekeeper=serialize_voice_gatekeeper_status(metrics.gatekeeper),
+    )
+
+
+def serialize_voice_evaluation_report(report: Any) -> VoiceEvaluationReportResponse:
+    return VoiceEvaluationReportResponse(
+        source=report.source,
+        generated_at=report.generated_at,
+        sample_count=report.sample_count,
+        intent_accuracy=report.intent_accuracy,
+        intent_macro_precision=report.intent_macro_precision,
+        intent_macro_recall=report.intent_macro_recall,
+        intent_macro_f1=report.intent_macro_f1,
+        action_accuracy=report.action_accuracy,
+        call_status_accuracy=report.call_status_accuracy,
+        scenario_accuracy=report.scenario_accuracy,
+        missing_fields_accuracy=report.missing_fields_accuracy,
+        slot_exact_match_rate=report.slot_exact_match_rate,
+        slot_field_accuracy=report.slot_field_accuracy,
+        escalation_accuracy=report.escalation_accuracy,
+        failed_case_ids=list(report.failed_case_ids),
+        per_intent={
+            label: VoiceEvaluationClassMetricsResponse(
+                precision=metrics.precision,
+                recall=metrics.recall,
+                f1=metrics.f1,
+                support=metrics.support,
+            )
+            for label, metrics in report.per_intent.items()
+        },
+        confusion_matrix=report.confusion_matrix,
+        cases=[
+            VoiceEvaluationCaseResponse(
+                case_id=case.case_id,
+                transcript=case.transcript,
+                expected_intent=case.expected_intent,
+                actual_intent=case.actual_intent,
+                intent_ok=case.intent_ok,
+                expected_action_name=case.expected_action_name,
+                actual_action_name=case.actual_action_name,
+                action_ok=case.action_ok,
+                expected_call_status=case.expected_call_status,
+                actual_call_status=case.actual_call_status,
+                call_status_ok=case.call_status_ok,
+                expected_scenario_id=case.expected_scenario_id,
+                actual_scenario_id=case.actual_scenario_id,
+                scenario_ok=case.scenario_ok,
+                expected_missing_fields=list(case.expected_missing_fields),
+                actual_missing_fields=list(case.actual_missing_fields),
+                missing_fields_ok=case.missing_fields_ok,
+                expected_slots=case.expected_slots,
+                actual_slots=case.actual_slots,
+                slot_matches=case.slot_matches,
+                slots_ok=case.slots_ok,
+                expected_escalated=case.expected_escalated,
+                actual_escalated=case.actual_escalated,
+                escalated_ok=case.escalated_ok,
+                reply_text=case.reply_text,
+            )
+            for case in report.cases
+        ],
+    )
+
+
+def serialize_voice_audio_quality(
+    audio: Any,
+    vad: Any,
+    transcript_quality: Any | None,
+) -> VoiceAudioQualityResponse:
+    blocking_reasons: list[str] = []
+    if not vad.has_speech:
+        blocking_reasons.append(vad.reason)
+    if transcript_quality is not None and not transcript_quality.accepted:
+        blocking_reasons.extend(transcript_quality.reasons)
+    accepted_for_agent = not blocking_reasons
+    if accepted_for_agent:
+        recommendation = "send_to_voice_agent"
+    elif not vad.has_speech:
+        recommendation = "ask_user_to_repeat_or_check_microphone"
+    else:
+        recommendation = "do_not_execute_actions_escalate_or_repeat"
+    return VoiceAudioQualityResponse(
+        audio=VoiceAudioBufferResponse(
+            path=audio.path,
+            sample_rate_hz=audio.sample_rate_hz,
+            channels=audio.channels,
+            sample_width_bytes=audio.sample_width_bytes,
+            frame_count=audio.frame_count,
+            duration_ms=audio.duration_ms,
+            rms=audio.rms,
+            peak=audio.peak,
+        ),
+        vad=VoiceVadResponse(
+            has_speech=vad.has_speech,
+            speech_ratio=vad.speech_ratio,
+            speech_ms=vad.speech_ms,
+            total_ms=vad.total_ms,
+            threshold=vad.threshold,
+            rms=vad.rms,
+            peak=vad.peak,
+            segments=[
+                VoiceVadSegmentResponse(
+                    start_ms=segment.start_ms,
+                    end_ms=segment.end_ms,
+                    rms=segment.rms,
+                )
+                for segment in vad.segments
+            ],
+            reason=vad.reason,
+        ),
+        transcript_quality=(
+            VoiceTranscriptQualityResponse(
+                accepted=transcript_quality.accepted,
+                risk_level=transcript_quality.risk_level,
+                reasons=list(transcript_quality.reasons),
+                normalized_text=transcript_quality.normalized_text,
+                token_count=transcript_quality.token_count,
+                unique_token_ratio=transcript_quality.unique_token_ratio,
+                confidence=transcript_quality.confidence,
+                wer=transcript_quality.wer,
+            )
+            if transcript_quality is not None
+            else None
+        ),
+        accepted_for_agent=accepted_for_agent,
+        blocking_reasons=blocking_reasons,
+        recommendation=recommendation,
     )
 
 

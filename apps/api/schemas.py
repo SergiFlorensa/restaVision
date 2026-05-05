@@ -420,3 +420,115 @@ class VoiceMetricsResponse(BaseModel):
     escalation_rate: float
     average_turns_per_call: float
     gatekeeper: VoiceGatekeeperStatusResponse
+
+
+class VoiceEvaluationClassMetricsResponse(BaseModel):
+    precision: float
+    recall: float
+    f1: float
+    support: int
+
+
+class VoiceEvaluationCaseResponse(BaseModel):
+    case_id: str
+    transcript: str
+    expected_intent: str
+    actual_intent: str
+    intent_ok: bool
+    expected_action_name: str
+    actual_action_name: str
+    action_ok: bool
+    expected_call_status: str | None
+    actual_call_status: str
+    call_status_ok: bool
+    expected_scenario_id: str | None
+    actual_scenario_id: str | None
+    scenario_ok: bool
+    expected_missing_fields: list[str]
+    actual_missing_fields: list[str]
+    missing_fields_ok: bool
+    expected_slots: dict[str, object]
+    actual_slots: dict[str, object]
+    slot_matches: dict[str, bool]
+    slots_ok: bool
+    expected_escalated: bool | None
+    actual_escalated: bool
+    escalated_ok: bool
+    reply_text: str
+
+
+class VoiceEvaluationReportResponse(BaseModel):
+    source: str
+    generated_at: datetime
+    sample_count: int
+    intent_accuracy: float
+    intent_macro_precision: float
+    intent_macro_recall: float
+    intent_macro_f1: float
+    action_accuracy: float
+    call_status_accuracy: float
+    scenario_accuracy: float
+    missing_fields_accuracy: float
+    slot_exact_match_rate: float
+    slot_field_accuracy: float
+    escalation_accuracy: float
+    failed_case_ids: list[str]
+    per_intent: dict[str, VoiceEvaluationClassMetricsResponse]
+    confusion_matrix: dict[str, dict[str, int]]
+    cases: list[VoiceEvaluationCaseResponse]
+
+
+class VoiceAudioQualityRequest(BaseModel):
+    wav_path: str = Field(min_length=1)
+    transcript: str | None = None
+    reference_text: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class VoiceAudioBufferResponse(BaseModel):
+    path: str
+    sample_rate_hz: int
+    channels: int
+    sample_width_bytes: int
+    frame_count: int
+    duration_ms: int
+    rms: float
+    peak: float
+
+
+class VoiceVadSegmentResponse(BaseModel):
+    start_ms: int
+    end_ms: int
+    rms: float
+
+
+class VoiceVadResponse(BaseModel):
+    has_speech: bool
+    speech_ratio: float
+    speech_ms: int
+    total_ms: int
+    threshold: float
+    rms: float
+    peak: float
+    segments: list[VoiceVadSegmentResponse]
+    reason: str
+
+
+class VoiceTranscriptQualityResponse(BaseModel):
+    accepted: bool
+    risk_level: str
+    reasons: list[str]
+    normalized_text: str
+    token_count: int
+    unique_token_ratio: float
+    confidence: float | None
+    wer: float | None
+
+
+class VoiceAudioQualityResponse(BaseModel):
+    audio: VoiceAudioBufferResponse
+    vad: VoiceVadResponse
+    transcript_quality: VoiceTranscriptQualityResponse | None
+    accepted_for_agent: bool
+    blocking_reasons: list[str]
+    recommendation: str

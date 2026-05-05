@@ -40,6 +40,157 @@ _SPANISH_NUMBERS = {
     "doce": 12,
 }
 
+_SPANISH_DIGIT_WORDS = {
+    "cero": "0",
+    "ceros": "0",
+    "un": "1",
+    "uno": "1",
+    "unos": "1",
+    "una": "1",
+    "unas": "1",
+    "dos": "2",
+    "tres": "3",
+    "cuatro": "4",
+    "cinco": "5",
+    "seis": "6",
+    "siete": "7",
+    "ocho": "8",
+    "nueve": "9",
+}
+
+_SPANISH_TEENS = {
+    "diez": 10,
+    "once": 11,
+    "doce": 12,
+    "trece": 13,
+    "catorce": 14,
+    "quince": 15,
+    "dieciseis": 16,
+    "diecisiete": 17,
+    "dieciocho": 18,
+    "diecinueve": 19,
+    "veinte": 20,
+    "veintiuno": 21,
+    "veintiun": 21,
+    "veintiuna": 21,
+    "veintidos": 22,
+    "veintitres": 23,
+    "veinticuatro": 24,
+    "veinticinco": 25,
+    "veintiseis": 26,
+    "veintisiete": 27,
+    "veintiocho": 28,
+    "veintinueve": 29,
+}
+
+_SPANISH_TENS = {
+    "treinta": 30,
+    "cuarenta": 40,
+    "cincuenta": 50,
+    "sesenta": 60,
+    "setenta": 70,
+    "ochenta": 80,
+    "noventa": 90,
+}
+
+_SPANISH_HUNDREDS = {
+    "cien": 100,
+    "ciento": 100,
+    "doscientos": 200,
+    "doscientas": 200,
+    "trescientos": 300,
+    "trescientas": 300,
+    "cuatrocientos": 400,
+    "cuatrocientas": 400,
+    "quinientos": 500,
+    "quinientas": 500,
+    "seiscientos": 600,
+    "seiscientas": 600,
+    "setecientos": 700,
+    "setecientas": 700,
+    "ochocientos": 800,
+    "ochocientas": 800,
+    "novecientos": 900,
+    "novecientas": 900,
+}
+
+_CUSTOMER_NAME_ALIASES = {
+    "seres": "Sergi",
+    "seres y": "Sergi",
+    "sergi": "Sergi",
+    "sergy": "Sergi",
+    "serji": "Sergi",
+    "sergio": "Sergio",
+}
+
+_NAME_STOP_WORDS = {
+    "mi",
+    "telefono",
+    "numero",
+    "para",
+    "a",
+    "las",
+    "es",
+    "seria",
+    "gracias",
+    "y",
+    "correcto",
+    "no",
+    "nombre",
+}
+
+_SPELLING_LETTERS = {
+    "a": "a",
+    "be": "b",
+    "b": "b",
+    "ce": "c",
+    "c": "c",
+    "de": "d",
+    "d": "d",
+    "e": "e",
+    "efe": "f",
+    "f": "f",
+    "ge": "g",
+    "g": "g",
+    "hache": "h",
+    "i": "i",
+    "jota": "j",
+    "ka": "k",
+    "k": "k",
+    "ele": "l",
+    "l": "l",
+    "eme": "m",
+    "m": "m",
+    "ene": "n",
+    "n": "n",
+    "enie": "ñ",
+    "o": "o",
+    "pe": "p",
+    "p": "p",
+    "cu": "q",
+    "q": "q",
+    "erre": "r",
+    "r": "r",
+    "ese": "s",
+    "s": "s",
+    "te": "t",
+    "t": "t",
+    "u": "u",
+    "uve": "v",
+    "ve": "v",
+    "v": "v",
+    "doble u": "w",
+    "uve doble": "w",
+    "w": "w",
+    "equis": "x",
+    "x": "x",
+    "ye": "y",
+    "i griega": "y",
+    "y": "y",
+    "zeta": "z",
+    "z": "z",
+}
+
 
 class VoiceReservationAgent:
     """Stateful prototype for voice reservation calls.
@@ -287,7 +438,51 @@ class VoiceReservationAgent:
         timestamp: datetime,
     ) -> VoiceTurnResult:
         call.status = VoiceCallStatus.COLLECTING_DETAILS
-        self._merge_entities(call.reservation_draft, normalized, reference=timestamp)
+        name_confirmation = _detect_name_confirmation(normalized)
+        if (
+            call.reservation_draft.customer_name is not None
+            and not call.reservation_draft.customer_name_confirmed
+        ):
+            if name_confirmation is False:
+                call.reservation_draft.customer_name_confirmation_attempts += 1
+                corrected_name = _extract_spelled_customer_name(
+                    normalized
+                ) or _extract_customer_name_correction(normalized)
+                call.reservation_draft.customer_name = corrected_name
+                call.reservation_draft.customer_name_confirmed = False
+                call.reservation_draft.customer_name_spelling_requested = (
+                    call.reservation_draft.customer_name_confirmation_attempts >= 1
+                )
+                if corrected_name is not None:
+                    return self._ask_customer_name_confirmation(call, confidence)
+                return VoiceTurnResult(
+                    call=call,
+                    reply_text=(
+                        "Disculpe, para anotarlo bien, puede deletrearme el nombre letra a letra?"
+                    ),
+                    intent=VoiceIntent.CREATE_RESERVATION,
+                    confidence=confidence,
+                    action_name="utter_ask_customer_name",
+                    action_payload={"missing_field": "customer_name"},
+                    missing_fields=("customer_name",),
+                )
+            if name_confirmation is True:
+                call.reservation_draft.customer_name_confirmed = True
+                call.reservation_draft.customer_name_spelling_requested = False
+
+        self._merge_entities(
+            call.reservation_draft,
+            normalized,
+            reference=timestamp,
+            phone_expected=_is_phone_expected_for_reservation(call.reservation_draft),
+            name_expected=_is_customer_name_expected(call.reservation_draft),
+        )
+        if (
+            call.reservation_draft.customer_name is not None
+            and not call.reservation_draft.customer_name_confirmed
+        ):
+            return self._ask_customer_name_confirmation(call, confidence)
+
         missing = self._missing_reservation_fields(call.reservation_draft)
         if missing:
             return VoiceTurnResult(
@@ -341,7 +536,8 @@ class VoiceReservationAgent:
             reply_text=(
                 f"Reserva confirmada para {reservation.party_size} personas "
                 f"{spoken_time}, "
-                f"a nombre de {reservation.customer_name}. Gracias."
+                f"a nombre de {reservation.customer_name}. "
+                "Muchas gracias, le esperamos en la Piemontesa de Passeig de Prim."
             ),
             intent=VoiceIntent.CREATE_RESERVATION,
             confidence=confidence,
@@ -354,6 +550,22 @@ class VoiceReservationAgent:
             availability=availability,
         )
 
+    def _ask_customer_name_confirmation(
+        self,
+        call: VoiceCall,
+        confidence: float,
+    ) -> VoiceTurnResult:
+        customer_name = call.reservation_draft.customer_name
+        return VoiceTurnResult(
+            call=call,
+            reply_text=f"He entendido {customer_name}. Es correcto el nombre?",
+            intent=VoiceIntent.CREATE_RESERVATION,
+            confidence=confidence,
+            action_name="utter_confirm_customer_name",
+            action_payload={"customer_name": customer_name},
+            missing_fields=("customer_name_confirmation",),
+        )
+
     def _handle_check_availability(
         self,
         call: VoiceCall,
@@ -361,7 +573,12 @@ class VoiceReservationAgent:
         confidence: float,
         timestamp: datetime,
     ) -> VoiceTurnResult:
-        self._merge_entities(call.reservation_draft, normalized, reference=timestamp)
+        self._merge_entities(
+            call.reservation_draft,
+            normalized,
+            reference=timestamp,
+            phone_expected=False,
+        )
         missing = tuple(
             field
             for field in ("party_size", "requested_time_text")
@@ -417,7 +634,12 @@ class VoiceReservationAgent:
         confidence: float,
         timestamp: datetime,
     ) -> VoiceTurnResult:
-        self._merge_entities(call.reservation_draft, normalized, reference=timestamp)
+        self._merge_entities(
+            call.reservation_draft,
+            normalized,
+            reference=timestamp,
+            phone_expected=True,
+        )
         reservation = self._find_reservation(call.reservation_draft)
         if reservation is None:
             missing = self._missing_cancel_fields(call.reservation_draft)
@@ -575,6 +797,8 @@ class VoiceReservationAgent:
         normalized: str,
         *,
         reference: datetime,
+        phone_expected: bool = False,
+        name_expected: bool = False,
     ) -> None:
         party_size = _extract_party_size(normalized)
         if party_size is not None:
@@ -593,10 +817,16 @@ class VoiceReservationAgent:
             draft.requested_at = reservation_time.requested_at
             draft.requested_time_text = reservation_time.display_text
             draft.time_parser = reservation_time.parser
-        customer_name = _extract_customer_name(normalized)
+        customer_name = _extract_customer_name(
+            normalized,
+            name_expected=name_expected,
+            spelling_expected=draft.customer_name_spelling_requested,
+        )
         if customer_name is not None:
+            if draft.customer_name != customer_name:
+                draft.customer_name_confirmed = False
             draft.customer_name = customer_name
-        phone = _extract_phone(normalized)
+        phone = _extract_phone(normalized, phone_expected=phone_expected)
         if phone is not None:
             draft.phone = phone
 
@@ -620,7 +850,16 @@ class VoiceReservationAgent:
             return VoiceIntent.CONFIRM_ARRIVAL
         if any(word in normalized for word in ("hay sitio", "disponibilidad", "teneis mesa")):
             return VoiceIntent.CHECK_AVAILABILITY
-        if any(word in normalized for word in ("reserv", "mesa para", "queria mesa")):
+        if any(
+            word in normalized
+            for word in (
+                "reserv",
+                "mesa para",
+                "queria mesa",
+                "hacer una reserva",
+                "hacer reserva",
+            )
+        ):
             return VoiceIntent.CREATE_RESERVATION
         if call.intent is not VoiceIntent.UNKNOWN:
             return call.intent
@@ -790,37 +1029,149 @@ def _extract_time_text(normalized: str) -> str | None:
     return None
 
 
-def _extract_customer_name(normalized: str) -> str | None:
+def _extract_customer_name(
+    normalized: str,
+    *,
+    name_expected: bool = False,
+    spelling_expected: bool = False,
+) -> str | None:
     match = re.search(
         r"(?:a nombre de|nombre de|me llamo|soy)\s+([a-zñ]+(?:\s+[a-zñ]+){0,2})",
         normalized,
     )
+    if not match and spelling_expected:
+        spelled_name = _extract_spelled_customer_name(normalized)
+        if spelled_name is not None:
+            return spelled_name
+    if not match and name_expected:
+        return _extract_expected_name_from_short_reply(normalized)
     if not match:
         return None
     raw = match.group(1)
-    stop_words = {
-        "mi",
-        "telefono",
-        "numero",
-        "para",
-        "a",
-        "las",
-        "es",
-        "seria",
-        "gracias",
-    }
-    cleaned_words = [word for word in raw.split() if word not in stop_words]
+    cleaned_words = [word for word in raw.split() if word not in _NAME_STOP_WORDS]
     if not cleaned_words:
         return None
-    return " ".join(word.capitalize() for word in cleaned_words)
+    return _format_customer_name(cleaned_words)
 
 
-def _extract_phone(normalized: str) -> str | None:
-    candidates = re.findall(r"(?:\+?\d[\d\s.-]{7,}\d)", normalized)
-    for candidate in candidates:
-        phone = _normalize_phone(candidate)
-        if len(phone) >= 9:
+def _extract_customer_name_correction(normalized: str) -> str | None:
+    spelled_name = _extract_spelled_customer_name(normalized)
+    if spelled_name is not None:
+        return spelled_name
+    matches = tuple(
+        re.finditer(
+            r"(?:es|seria|se llama|me llamo|a nombre de|nombre de)\s+"
+            r"([a-zÃ±]+(?:\s+[a-zÃ±]+){0,2})",
+            normalized,
+        )
+    )
+    if not matches:
+        return None
+    match = matches[-1]
+    raw = match.group(1)
+    cleaned_words = [word for word in raw.split() if word not in _NAME_STOP_WORDS]
+    if not cleaned_words:
+        return None
+    return _format_customer_name(cleaned_words)
+
+
+def _detect_name_confirmation(normalized: str) -> bool | None:
+    if re.search(
+        r"\b(?:no|incorrecto|no es correcto|te has equivocado|se ha equivocado|"
+        r"no es mi nombre|ese no es|este no es)\b",
+        normalized,
+    ):
+        return False
+    if re.search(
+        r"\b(?:si|correcto|exacto|eso es|esta bien|es correcto|vale|de acuerdo)\b",
+        normalized,
+    ):
+        return True
+    return None
+
+
+def _is_customer_name_expected(draft: ReservationDraft) -> bool:
+    return (
+        draft.customer_name is None
+        and draft.party_size is not None
+        and draft.requested_time_text is not None
+    ) or draft.customer_name_spelling_requested
+
+
+def _extract_expected_name_from_short_reply(normalized: str) -> str | None:
+    if _detect_name_confirmation(normalized) is not None:
+        return None
+    if _has_phone_context(normalized) or re.search(r"\d", normalized):
+        return None
+    tokens = [
+        token
+        for token in re.findall(r"[a-z]+", normalized)
+        if token not in _NAME_STOP_WORDS and token not in {"hola", "buenas", "mira"}
+    ]
+    if not tokens or len(tokens) > 3:
+        return None
+    return _format_customer_name(tokens)
+
+
+def _extract_spelled_customer_name(normalized: str) -> str | None:
+    text = re.sub(
+        r"\b(?:se escribe|deletreado|deletreo|letra a letra|seria|es|nombre)\b",
+        " ",
+        normalized,
+    )
+    tokens = re.findall(r"[a-z]+", text)
+    letters: list[str] = []
+    index = 0
+    while index < len(tokens):
+        if index + 1 < len(tokens):
+            pair = f"{tokens[index]} {tokens[index + 1]}"
+            if pair in _SPELLING_LETTERS:
+                letters.append(_SPELLING_LETTERS[pair])
+                index += 2
+                continue
+        letter = _SPELLING_LETTERS.get(tokens[index])
+        if letter is not None:
+            letters.append(letter)
+        index += 1
+    if len(letters) < 2:
+        return None
+    return "".join(letters).capitalize()
+
+
+def _format_customer_name(words: list[str]) -> str:
+    cleaned = " ".join(words)
+    return _CUSTOMER_NAME_ALIASES.get(
+        cleaned,
+        " ".join(word.capitalize() for word in words),
+    )
+
+
+def _is_phone_expected_for_reservation(draft: ReservationDraft) -> bool:
+    return (
+        draft.phone is None
+        and draft.party_size is not None
+        and draft.requested_time_text is not None
+        and draft.customer_name is not None
+        and draft.customer_name_confirmed
+    )
+
+
+def _extract_phone(normalized: str, *, phone_expected: bool = False) -> str | None:
+    for match in re.finditer(r"(?<!\d)(?:\+?\d[\d\s.-]{5,}\d)(?!\d)", normalized):
+        phone = _normalize_phone(match.group(0))
+        if _is_acceptable_phone(phone, focused=phone_expected or _has_phone_context(normalized)):
             return phone
+
+    focused_segments = _phone_focused_segments(normalized)
+    for segment in focused_segments:
+        spoken_phone = _extract_spoken_phone(segment)
+        if spoken_phone is not None and _is_acceptable_phone(spoken_phone, focused=True):
+            return spoken_phone
+
+    if phone_expected:
+        spoken_phone = _extract_spoken_phone(normalized)
+        if spoken_phone is not None and _is_acceptable_phone(spoken_phone, focused=True):
+            return spoken_phone
     return None
 
 
@@ -828,3 +1179,153 @@ def _normalize_phone(phone: str) -> str:
     prefix = "+" if phone.strip().startswith("+") else ""
     digits = re.sub(r"\D", "", phone)
     return f"{prefix}{digits}" if digits else phone
+
+
+def _is_acceptable_phone(phone: str, *, focused: bool) -> bool:
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) == 9:
+        return True
+    return focused and digits.startswith("34") and len(digits) == 11
+
+
+def _has_phone_context(normalized: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:telefono|movil|contacto|numero\s+(?:de\s+)?telefono|numero\s+de\s+contacto)\b",
+            normalized,
+        )
+    )
+
+
+def _phone_focused_segments(normalized: str) -> list[str]:
+    segments: list[str] = []
+    trigger_pattern = re.compile(
+        r"\b(?:mi\s+)?(?:telefono|movil|contacto|numero\s+(?:de\s+)?telefono|"
+        r"numero\s+de\s+contacto)\b"
+    )
+    stop_pattern = re.compile(
+        r"\b(?:a\s+nombre\s+de|nombre\s+de|me\s+llamo|soy|gracias|por\s+favor)\b"
+    )
+    for match in trigger_pattern.finditer(normalized):
+        segment = normalized[match.end() :]
+        stop = stop_pattern.search(segment)
+        if stop:
+            segment = segment[: stop.start()]
+        segments.append(segment)
+    return segments
+
+
+def _extract_spoken_phone(text: str) -> str | None:
+    tokens = re.findall(r"\d+|[a-zñ]+", text)
+    if not tokens:
+        return None
+    groups: list[str] = []
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token.isdigit():
+            groups.append(token)
+            index += 1
+            continue
+
+        zero_repeat = _parse_zero_repeat(tokens, index)
+        if zero_repeat is not None:
+            digits, consumed = zero_repeat
+            groups.append(digits)
+            index += consumed
+            continue
+
+        repeated_digit = _parse_repeated_digit(tokens, index)
+        if repeated_digit is not None:
+            digits, consumed = repeated_digit
+            groups.append(digits)
+            index += consumed
+            continue
+
+        parsed_number = _parse_spanish_number_group(tokens, index)
+        if parsed_number is not None:
+            value, consumed = parsed_number
+            groups.append(_phone_group_digits(value))
+            index += consumed
+            continue
+
+        index += 1
+
+    digits = "".join(groups)
+    return digits if digits else None
+
+
+def _parse_zero_repeat(tokens: list[str], index: int) -> tuple[str, int] | None:
+    if index + 1 >= len(tokens):
+        return None
+    amount = _small_count(tokens[index])
+    if amount is None or amount < 2 or amount > 4:
+        return None
+    if tokens[index + 1] not in {"cero", "ceros"}:
+        return None
+    return "0" * amount, 2
+
+
+def _parse_repeated_digit(tokens: list[str], index: int) -> tuple[str, int] | None:
+    repeat_counts = {"doble": 2, "triple": 3}
+    repeat_count = repeat_counts.get(tokens[index])
+    if repeat_count is None or index + 1 >= len(tokens):
+        return None
+    digit = _single_spoken_digit(tokens[index + 1])
+    if digit is None:
+        return None
+    return digit * repeat_count, 2
+
+
+def _parse_spanish_number_group(tokens: list[str], index: int) -> tuple[int, int] | None:
+    token = tokens[index]
+    if token in _SPANISH_HUNDREDS:
+        value = _SPANISH_HUNDREDS[token]
+        consumed = 1
+        tail = _parse_spanish_number_under_100(tokens, index + consumed)
+        if tail is not None:
+            tail_value, tail_consumed = tail
+            value += tail_value
+            consumed += tail_consumed
+        return value, consumed
+    return _parse_spanish_number_under_100(tokens, index)
+
+
+def _parse_spanish_number_under_100(tokens: list[str], index: int) -> tuple[int, int] | None:
+    if index >= len(tokens):
+        return None
+    token = tokens[index]
+    digit = _single_spoken_digit(token)
+    if digit is not None:
+        return int(digit), 1
+    if token in _SPANISH_TEENS:
+        return _SPANISH_TEENS[token], 1
+    if token not in _SPANISH_TENS:
+        return None
+    value = _SPANISH_TENS[token]
+    consumed = 1
+    if index + 2 < len(tokens) and tokens[index + 1] == "y":
+        unit = _single_spoken_digit(tokens[index + 2])
+        if unit is not None:
+            value += int(unit)
+            consumed = 3
+    return value, consumed
+
+
+def _single_spoken_digit(token: str) -> str | None:
+    return _SPANISH_DIGIT_WORDS.get(token)
+
+
+def _small_count(token: str) -> int | None:
+    values = {"dos": 2, "tres": 3, "cuatro": 4}
+    return values.get(token)
+
+
+def _phone_group_digits(value: int) -> str:
+    if value < 10:
+        return str(value)
+    if value < 100:
+        return f"{value:02d}"
+    if value < 1000:
+        return f"{value:03d}"
+    return str(value)
