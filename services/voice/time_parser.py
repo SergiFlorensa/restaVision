@@ -178,6 +178,7 @@ def _parse_manual_spanish_time(
     if time_match:
         hour = int(time_match.group(1))
         minute = int(time_match.group(2) or 0)
+        hour = _apply_day_period(hour, text)
     else:
         word_match = re.search(
             r"\b(?:a las|a los|a la|sobre las|sobre los|para las|para los)\s+"
@@ -190,8 +191,7 @@ def _parse_manual_spanish_time(
         if not word_match:
             return None
         hour = _TIME_WORDS[word_match.group(1)]
-        if hour < 12 and "medio dia" not in text and "mediodia" not in text:
-            hour += 12
+        hour = _apply_day_period(hour, text, default_to_evening=True)
         minute = 30 if word_match.group(2) == "media" else 15 if word_match.group(2) else 0
 
     date_offset = _relative_day_offset(text)
@@ -226,6 +226,23 @@ def _relative_day_offset(text: str) -> int:
     if "hoy" in text:
         return 0
     return 0
+
+
+def _apply_day_period(hour: int, text: str, *, default_to_evening: bool = False) -> int:
+    if hour >= 12:
+        return hour
+    if any(marker in text for marker in ("mediodia", "medio dia", "tarde")):
+        if 1 <= hour <= 7:
+            return hour + 12
+    if "noche" in text and 1 <= hour <= 11:
+        return hour + 12
+    if "manana" in text and not any(
+        marker in text for marker in ("manana a las", "manana para", "manana sobre")
+    ):
+        return hour
+    if default_to_evening:
+        return hour + 12
+    return hour
 
 
 def _weekday_offset(text: str, reference: datetime) -> int | None:

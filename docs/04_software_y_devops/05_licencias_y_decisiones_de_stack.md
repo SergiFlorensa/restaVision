@@ -28,6 +28,7 @@ Herramientas alineadas o candidatas:
   adecuada o aislarlo como componente opcional. Las voces `rhasspy/piper-voices`
   deben revisarse por modelo antes de redistribuir — https://github.com/OHF-voice/piper1-gpl
 - Kokoro ONNX — wrapper MIT y modelo Kokoro Apache-2.0; usar como TTS avanzado opcional local, con modelos en `models/checkpoints/` sin versionar — https://github.com/thewh1teagle/kokoro-onnx
+- Ollama + Gemma 4 — capa opcional local para reescritura/compresion de respuestas antes del TTS. No introduce coste API si se ejecuta en local. Para el portatil del TFG se recomienda empezar con `gemma4:e2b-it-q4_K_M`; `gemma4:e4b-it-q4_K_M` queda para benchmark si la latencia y RAM son aceptables. Revisar condiciones de Ollama y licencia del modelo antes de uso comercial/redistribucion — https://ollama.com/library/gemma4/tags
 - Silero VAD — MIT — https://github.com/snakers4/silero-vad
 - Rasa Open Source — Apache-2.0 — https://github.com/RasaHQ/rasa
 - dateparser — BSD — https://dateparser.readthedocs.io/
@@ -38,6 +39,7 @@ Decision actual:
 - prototipo primero en navegador, sin telefonia real,
 - Vosk como STT local inicial por streaming y bajo coste,
 - Windows SAPI/Piper como fallback TTS local inicial y Kokoro ONNX como TTS avanzado para demo natural en CPU,
+- Ollama/Gemma 4 solo como compresor opcional de texto antes del TTS, siempre con fallback al texto determinista del agente,
 - reglas + `dateparser` para intenciones y fechas en el MVP,
 - Rasa/spaCy/Duckling solo si las reglas dejan de ser suficientes,
 - Asterisk como integracion avanzada y opcional, no como requisito del MVP.

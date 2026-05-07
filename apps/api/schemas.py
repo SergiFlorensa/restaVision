@@ -352,6 +352,9 @@ class VoiceCallResponse(BaseModel):
     reservation_id: str | None
     escalated_reason: str | None
     ended_at: datetime | None
+    background_reply_status: str
+    background_reply_text: str | None
+    background_reply_reason: str | None
 
 
 class VoiceTurnRequest(BaseModel):

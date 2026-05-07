@@ -68,3 +68,7 @@ models/checkpoints/*
 models/exported/*
 !models/exported/.gitkeep
 *.pt
+
+# Binarios locales generados para probes nativos
+tools/native/*.exe
+tools/native/*.pdb

@@ -855,6 +855,22 @@ def create_app(mvp_service: RestaurantMVPService | None = None) -> FastAPI:
         return serialize_voice_turn_result(result)
 
     @app.get(
+        "/api/v1/voice/calls/{call_id}/background-reply",
+        response_model=VoiceTurnResponse | None,
+        tags=["voice"],
+    )
+    def get_voice_background_reply(
+        request: Request,
+        call_id: str,
+    ) -> VoiceTurnResponse | None:
+        voice_agent = get_voice_agent(request)
+        try:
+            result = voice_agent.consume_background_reply(call_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+        return serialize_voice_turn_result(result) if result is not None else None
+
+    @app.get(
         "/api/v1/voice/reservations",
         response_model=list[VoiceReservationResponse],
         tags=["voice"],
@@ -1275,6 +1291,9 @@ def serialize_voice_call(call: Any) -> VoiceCallResponse:
         reservation_id=call.reservation_id,
         escalated_reason=call.escalated_reason,
         ended_at=call.ended_at,
+        background_reply_status=call.background_reply_status,
+        background_reply_text=call.background_reply_text,
+        background_reply_reason=call.background_reply_reason,
     )
 
 

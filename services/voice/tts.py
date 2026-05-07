@@ -36,6 +36,8 @@ alergias, quejas o errores.
 VOICE_PROFILE_ALIASES = {
     "castellano": "castilian_neutral",
     "castellano_neutro": "castilian_neutral",
+    "castellano_dinamico": "castilian_service",
+    "dinamico": "castilian_service",
     "es_es": "castilian_neutral",
     "peninsular": "castilian_neutral",
     "spain": "castilian_neutral",
@@ -54,6 +56,28 @@ VOICE_RENDERING_PROFILES: dict[str, dict[str, object]] = {
         "speed_multiplier": 0.94,
         "system_prompt": CASTILIAN_NEUTRAL_VOICE_PROMPT,
     },
+    "castilian_service": {
+        "description": (
+            "Perfil telefonico mas agil para sala: castellano de Espana, trato cercano, "
+            "pausas breves y respuesta menos plana sin ser teatral."
+        ),
+        "speed_multiplier": 0.99,
+        "system_prompt": CASTILIAN_NEUTRAL_VOICE_PROMPT,
+    },
+}
+
+_SPOKEN_DIGIT_WORDS = {
+    "cero",
+    "uno",
+    "una",
+    "dos",
+    "tres",
+    "cuatro",
+    "cinco",
+    "seis",
+    "siete",
+    "ocho",
+    "nueve",
 }
 
 
@@ -526,11 +550,13 @@ def _apply_voice_profile_speed(speed: float, voice_profile: str) -> float:
 
 
 def _apply_voice_profile_text(text: str, voice_profile: str) -> str:
-    if voice_profile != "castilian_neutral":
+    if voice_profile not in {"castilian_neutral", "castilian_service"}:
         return text
     prepared = _normalize_castilian_restaurant_lexicon(text)
     prepared = _add_castilian_service_cadence(prepared)
     prepared = _add_castilian_information_focus(prepared)
+    if voice_profile == "castilian_service":
+        prepared = _add_castilian_service_warmth(prepared)
     return prepared
 
 
@@ -546,6 +572,7 @@ def _normalize_spanish_tts_text(text: str) -> str:
         "politica": "política",
         "direccion": "dirección",
         "informacion": "información",
+        "numero": "número",
         "situacion": "situación",
         "cancelacion": "cancelación",
         "facturacion": "facturación",
@@ -625,7 +652,7 @@ def _add_castilian_information_focus(text: str) -> str:
     )
     focused = re.sub(
         r"\b(tel[eé]fono|m[oó]vil)\s+((?:[a-záéíóúñ]+(?:\s|,\s*)?){3,})",
-        lambda match: f"{match.group(1)}: {match.group(2).strip()}",
+        lambda match: _focus_spoken_phone(match),
         focused,
         flags=re.IGNORECASE,
     )
@@ -648,6 +675,62 @@ def _add_castilian_information_focus(text: str) -> str:
         flags=re.IGNORECASE,
     )
     return focused
+
+
+def _focus_spoken_phone(match: re.Match[str]) -> str:
+    label = match.group(1)
+    spoken_value = match.group(2).strip()
+    words = re.findall(r"[a-zÃ¡Ã©Ã­Ã³ÃºÃ±]+", spoken_value.lower())
+    if words and all(word in _SPOKEN_DIGIT_WORDS for word in words):
+        return f"{label}: {spoken_value}"
+    return match.group(0)
+
+
+def _add_castilian_service_warmth(text: str) -> str:
+    warmed = text
+    warmed = re.sub(
+        r"^Entiendo\.\s+Lo compruebo un momento\.",
+        "De acuerdo. Lo reviso un momento.",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"^Para alergias o restricciones alimentarias prefiero que lo confirme el encargado",
+        "En este caso, prefiero que lo confirme el encargado",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"^Lamento la situaci[oÃ³]n\.\s+Le paso con el encargado",
+        "Vaya, lo siento. Le paso con el encargado",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"^No le he entendido bien\.",
+        "Disculpe, no le he entendido bien.",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"\bA qu[eÃ©] nombre dejamos la reserva\?",
+        "Me dice el nombre para la reserva?",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"\bMe confirma un n[uÃº]mero de tel[eÃ©]fono de contacto\?",
+        "Me confirma un telÃ©fono de contacto?",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    warmed = re.sub(
+        r"\bMe confirma un número de teléfono de contacto\?",
+        "Me confirma un teléfono de contacto?",
+        warmed,
+        flags=re.IGNORECASE,
+    )
+    return warmed
 
 
 def _normalize_structured_speech(text: str) -> str:

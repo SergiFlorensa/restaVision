@@ -90,6 +90,9 @@ class VoiceCall:
     turns: list[VoiceTurn] = field(default_factory=list)
     escalated_reason: str | None = None
     ended_at: datetime | None = None
+    background_reply_status: str = "idle"
+    background_reply_text: str | None = None
+    background_reply_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

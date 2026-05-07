@@ -15,6 +15,11 @@ if str(ROOT_DIR) not in sys.path:
 
 
 def main() -> None:
+    from services.voice.response_compressor import (
+        DEFAULT_OLLAMA_GEMMA4_MODEL,
+        DEFAULT_OLLAMA_URL,
+        build_voice_reply_compressor,
+    )
     from services.voice.tts import (
         DEFAULT_KOKORO_MODEL_PATH,
         DEFAULT_KOKORO_VOICES_PATH,
@@ -75,6 +80,23 @@ def main() -> None:
     )
     parser.add_argument("--cache-dir", type=Path, default=Path("data/local_samples/tts_cache"))
     parser.add_argument("--no-cache", action="store_true")
+    parser.add_argument(
+        "--reply-compressor",
+        default="none",
+        choices=("none", "ollama"),
+        help="Reescribe la respuesta antes del TTS. Ollama usa un modelo local.",
+    )
+    parser.add_argument(
+        "--reply-compressor-model",
+        default=DEFAULT_OLLAMA_GEMMA4_MODEL,
+        help="Modelo local de Ollama para compresion, por ejemplo gemma4:e2b-it-q4_K_M.",
+    )
+    parser.add_argument("--ollama-url", default=DEFAULT_OLLAMA_URL)
+    parser.add_argument("--ollama-timeout", type=float, default=6.0)
+    parser.add_argument("--ollama-keep-alive", default="30m")
+    parser.add_argument("--ollama-num-predict", type=int, default=24)
+    parser.add_argument("--ollama-num-ctx", type=int, default=512)
+    parser.add_argument("--ollama-num-thread", type=int, default=None)
     parser.add_argument("--play", action="store_true")
     args = parser.parse_args()
     model_path = args.model_path
@@ -97,10 +119,30 @@ def main() -> None:
         voice_profile=args.voice_profile,
         cache_dir=None if args.no_cache else args.cache_dir,
     )
-    result = adapter.synthesize_to_file(args.text, args.output)
+    compressor = build_voice_reply_compressor(
+        args.reply_compressor,
+        model=args.reply_compressor_model,
+        endpoint_url=args.ollama_url,
+        timeout_seconds=args.ollama_timeout,
+        keep_alive=args.ollama_keep_alive,
+        num_predict=args.ollama_num_predict,
+        num_ctx=args.ollama_num_ctx,
+        num_thread=args.ollama_num_thread,
+    )
+    compression_result = compressor.compress(args.text)
+    result = adapter.synthesize_to_file(compression_result.output_text, args.output)
     if args.play:
         _play_wav(args.output)
-    print(json.dumps(_to_jsonable(result), ensure_ascii=False, indent=2))
+    print(
+        json.dumps(
+            {
+                "compression": _to_jsonable(compression_result),
+                "tts": _to_jsonable(result),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def _play_wav(path: Path) -> None:

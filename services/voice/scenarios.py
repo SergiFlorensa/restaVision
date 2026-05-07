@@ -65,9 +65,12 @@ CALL_SCENARIOS: tuple[VoiceScenario, ...] = (
         intent=VoiceIntent.OPERATIONAL_NOTICE,
         label="Aviso de retraso",
         keywords=("llego tarde", "llegamos tarde", "retraso", "nos retrasamos"),
-        reply_text="Tomo nota del aviso y le paso con el encargado para confirmar la reserva.",
+        reply_text=(
+            "Tomo nota del retraso. Si la reserva se retrasa mucho, "
+            "conviene que lo confirme el encargado."
+        ),
         risk="medium",
-        interrupts_reservation=True,
+        requires_manager=False,
     ),
     VoiceScenario(
         scenario_id="opening_hours",
@@ -87,8 +90,8 @@ CALL_SCENARIOS: tuple[VoiceScenario, ...] = (
             "hasta que hora",
         ),
         reply_text=(
-            "Para no darle un horario incorrecto, le paso con el encargado "
-            "o puedo tomar una solicitud de reserva."
+            "Para no darle un horario incorrecto, puedo tomar una reserva "
+            "o pasarle con el encargado para confirmarlo."
         ),
         risk="low",
     ),
@@ -123,12 +126,12 @@ CALL_SCENARIOS: tuple[VoiceScenario, ...] = (
         scenario_id="terrace",
         intent=VoiceIntent.SPECIAL_REQUEST,
         label="Terraza o zona concreta",
-        keywords=("terraza", "fuera", "interior", "ventana"),
+        keywords=("terraza", "fuera", "interior", "ventana", "zona tranquila"),
         reply_text=(
-            "La preferencia de zona depende de disponibilidad real. "
-            "Le paso con el encargado para confirmarlo."
+            "Puedo anotar la preferencia de zona, aunque dependera de la disponibilidad real."
         ),
         risk="medium",
+        requires_manager=False,
     ),
     VoiceScenario(
         scenario_id="accessibility",
@@ -152,8 +155,49 @@ CALL_SCENARIOS: tuple[VoiceScenario, ...] = (
         intent=VoiceIntent.SPECIAL_REQUEST,
         label="Ninos, tronas o carritos",
         keywords=("trona", "nino", "bebe", "carrito"),
-        reply_text=("Para preparar bien la mesa familiar le paso con el encargado."),
+        reply_text=(
+            "Lo anoto para preparar la mesa familiar. Si hace falta, lo revisa el encargado."
+        ),
         risk="low",
+        requires_manager=False,
+    ),
+    VoiceScenario(
+        scenario_id="party_size_change",
+        intent=VoiceIntent.MODIFY_RESERVATION,
+        label="Cambiar numero de personas",
+        keywords=(
+            "anadir personas",
+            "sumar personas",
+            "quitar personas",
+            "seremos mas",
+            "seremos menos",
+            "una persona mas",
+            "dos personas mas",
+        ),
+        reply_text=(
+            "Para cambiar el numero de personas de una reserva, "
+            "le paso con el encargado y lo ajusta sin errores."
+        ),
+        risk="medium",
+        interrupts_reservation=True,
+    ),
+    VoiceScenario(
+        scenario_id="reservation_time_change",
+        intent=VoiceIntent.MODIFY_RESERVATION,
+        label="Cambiar hora de reserva",
+        keywords=(
+            "cambiar la hora",
+            "mover la reserva",
+            "adelantar la reserva",
+            "retrasar la reserva",
+            "otra hora",
+        ),
+        reply_text=(
+            "Para cambiar la hora de una reserva, le paso con el encargado "
+            "y revisa disponibilidad real."
+        ),
+        risk="medium",
+        interrupts_reservation=True,
     ),
     VoiceScenario(
         scenario_id="takeaway_delivery",

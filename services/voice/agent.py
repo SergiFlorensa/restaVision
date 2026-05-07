@@ -7,6 +7,11 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from services.events.service import RestaurantMVPService
+from services.voice.background_advisor import (
+    BackgroundAdviceRequest,
+    BackgroundVoiceAdvisor,
+    DisabledBackgroundVoiceAdvisor,
+)
 from services.voice.models import (
     AvailabilityResult,
     ReservationDraft,
@@ -20,6 +25,7 @@ from services.voice.models import (
     VoiceTurn,
     VoiceTurnResult,
 )
+from services.voice.reply_catalog import render_voice_reply
 from services.voice.scenarios import VoiceScenario, classify_voice_scenario
 from services.voice.speech_text import reservation_time_for_speech
 from services.voice.time_parser import parse_reservation_date, parse_reservation_time
@@ -206,11 +212,13 @@ class VoiceReservationAgent:
         max_auto_party_size: int = 6,
         low_confidence_threshold: float = 0.55,
         guarded_ready_table_ratio: float = 0.25,
+        background_advisor: BackgroundVoiceAdvisor | None = None,
     ) -> None:
         self.restaurant_service = restaurant_service
         self.max_auto_party_size = max_auto_party_size
         self.low_confidence_threshold = low_confidence_threshold
         self.guarded_ready_table_ratio = guarded_ready_table_ratio
+        self.background_advisor = background_advisor or DisabledBackgroundVoiceAdvisor()
         self.calls: dict[str, VoiceCall] = {}
         self.reservations: dict[str, VoiceReservation] = {}
 
@@ -246,6 +254,33 @@ class VoiceReservationAgent:
             self.reservations.values(),
             key=lambda item: item.created_at,
             reverse=True,
+        )
+
+    def consume_background_reply(self, call_id: str) -> VoiceTurnResult | None:
+        call = self.get_call(call_id)
+        result = self.background_advisor.consume_ready(call_id)
+        if result is None:
+            return None
+        if result.reply_text is None:
+            call.background_reply_status = result.status
+            call.background_reply_text = None
+            return None
+        call.background_reply_status = "consumed"
+        call.background_reply_text = result.reply_text
+        return VoiceTurnResult(
+            call=call,
+            reply_text=render_voice_reply(
+                "utter_background_advice_ready",
+                reply_text=result.reply_text,
+            ),
+            intent=call.intent,
+            confidence=0.72,
+            action_name="utter_background_advice_ready",
+            action_payload={
+                "source": "background_advisor",
+                "elapsed_ms": result.elapsed_ms,
+                "reason": result.request.reason,
+            },
         )
 
     def gatekeeper_status(self) -> VoiceGatekeeperStatus:
@@ -390,13 +425,21 @@ class VoiceReservationAgent:
             return self._escalate(
                 call,
                 reason="low_stt_confidence",
-                reply_text=(
-                    "No he entendido la llamada con suficiente claridad. Le paso con el encargado."
-                ),
+                reply_text=render_voice_reply("utter_low_confidence_escalation"),
             )
 
         if scenario is not None and (scenario.interrupts_reservation or intent is scenario.intent):
             return self._handle_scenario(call, scenario)
+        if self._should_request_background_advice(normalized, intent):
+            self._request_background_advice(call, normalized, intent)
+            return VoiceTurnResult(
+                call=call,
+                reply_text=render_voice_reply("utter_background_advice_bridge"),
+                intent=intent,
+                confidence=confidence,
+                action_name="utter_background_advice_bridge",
+                action_payload={"reason": call.background_reply_reason or "complex_turn"},
+            )
         if intent is VoiceIntent.CREATE_RESERVATION:
             return self._handle_create_reservation(call, normalized, confidence, timestamp)
         if intent is VoiceIntent.CHECK_AVAILABILITY:
@@ -407,22 +450,17 @@ class VoiceReservationAgent:
             return self._escalate(
                 call,
                 reason="modify_reservation_requires_manager",
-                reply_text=(
-                    "Para modificar una reserva prefiero pasarle con el encargado y evitar errores."
-                ),
+                reply_text=render_voice_reply("utter_modify_requires_manager"),
             )
         if intent in {VoiceIntent.CONFIRM_ARRIVAL, VoiceIntent.SPEAK_TO_MANAGER}:
             return self._escalate(
                 call,
                 reason=intent.value,
-                reply_text="Un momento, le paso con el encargado.",
+                reply_text=render_voice_reply("utter_manager_transfer"),
             )
         return VoiceTurnResult(
             call=call,
-            reply_text=(
-                "Puedo ayudarle con una reserva, una cancelacion o una consulta "
-                "de disponibilidad. Que necesita?"
-            ),
+            reply_text=render_voice_reply("utter_ask_intent"),
             intent=VoiceIntent.UNKNOWN,
             confidence=confidence,
             action_name="utter_ask_intent",
@@ -457,9 +495,7 @@ class VoiceReservationAgent:
                     return self._ask_customer_name_confirmation(call, confidence)
                 return VoiceTurnResult(
                     call=call,
-                    reply_text=(
-                        "Disculpe, para anotarlo bien, puede deletrearme el nombre letra a letra?"
-                    ),
+                    reply_text=render_voice_reply("utter_ask_customer_name_spelling"),
                     intent=VoiceIntent.CREATE_RESERVATION,
                     confidence=confidence,
                     action_name="utter_ask_customer_name",
@@ -500,20 +536,14 @@ class VoiceReservationAgent:
             return self._escalate(
                 call,
                 reason=availability.reason,
-                reply_text=(
-                    "Ahora mismo la sala esta en un punto de mucha carga. "
-                    "Para no darle una reserva que no podamos cumplir, le paso con el encargado."
-                ),
+                reply_text=render_voice_reply("utter_service_pressure_transfer"),
                 availability=availability,
             )
         if not availability.available:
             call.status = VoiceCallStatus.REJECTED
             return VoiceTurnResult(
                 call=call,
-                reply_text=(
-                    "Ahora mismo no puedo garantizar esa mesa. "
-                    "Puedo dejar aviso al encargado o buscar otra hora."
-                ),
+                reply_text=render_voice_reply("utter_reject_reservation"),
                 intent=VoiceIntent.CREATE_RESERVATION,
                 confidence=confidence,
                 action_name="action_reject_reservation",
@@ -533,11 +563,11 @@ class VoiceReservationAgent:
         )
         return VoiceTurnResult(
             call=call,
-            reply_text=(
-                f"Reserva confirmada para {reservation.party_size} personas "
-                f"{spoken_time}, "
-                f"a nombre de {reservation.customer_name}. "
-                "Muchas gracias, le esperamos en la Piemontesa de Passeig de Prim."
+            reply_text=render_voice_reply(
+                "action_confirm_reservation",
+                party_size=reservation.party_size,
+                spoken_time=spoken_time,
+                customer_name=reservation.customer_name,
             ),
             intent=VoiceIntent.CREATE_RESERVATION,
             confidence=confidence,
@@ -558,7 +588,10 @@ class VoiceReservationAgent:
         customer_name = call.reservation_draft.customer_name
         return VoiceTurnResult(
             call=call,
-            reply_text=f"He entendido {customer_name}. Es correcto el nombre?",
+            reply_text=render_voice_reply(
+                "utter_confirm_customer_name",
+                customer_name=customer_name,
+            ),
             intent=VoiceIntent.CREATE_RESERVATION,
             confidence=confidence,
             action_name="utter_confirm_customer_name",
@@ -608,10 +641,7 @@ class VoiceReservationAgent:
             )
             action_name = "utter_offer_reservation"
         else:
-            reply = (
-                "Ahora mismo no puedo garantizar disponibilidad para esa peticion. "
-                "Puedo pasar aviso al encargado."
-            )
+            reply = render_voice_reply("utter_reject_availability")
             action_name = "utter_reject_availability"
         return VoiceTurnResult(
             call=call,
@@ -656,10 +686,7 @@ class VoiceReservationAgent:
             return self._escalate(
                 call,
                 reason="reservation_not_found",
-                reply_text=(
-                    "No localizo la reserva con esos datos. "
-                    "Le paso con el encargado para revisarlo."
-                ),
+                reply_text=render_voice_reply("utter_reservation_not_found"),
             )
 
         cancelled = replace(reservation, status=VoiceReservationStatus.CANCELLED)
@@ -683,8 +710,9 @@ class VoiceReservationAgent:
         )
         return VoiceTurnResult(
             call=call,
-            reply_text=(
-                f"Reserva a nombre de {cancelled.customer_name} cancelada. Gracias por avisar."
+            reply_text=render_voice_reply(
+                "action_cancel_reservation",
+                customer_name=cancelled.customer_name,
             ),
             intent=VoiceIntent.CANCEL_RESERVATION,
             confidence=confidence,
@@ -892,6 +920,48 @@ class VoiceReservationAgent:
             },
         )
 
+    def _should_request_background_advice(self, normalized: str, intent: VoiceIntent) -> bool:
+        if intent in {VoiceIntent.CANCEL_RESERVATION, VoiceIntent.SPEAK_TO_MANAGER}:
+            return False
+        if len(normalized.split()) < 16:
+            return False
+        complex_markers = (
+            "ventana",
+            "zona tranquila",
+            "persona mayor",
+            "movilidad",
+            "llega tarde",
+            "llegamos tarde",
+            "si llega tarde",
+            "prefiere",
+            "podria",
+            "seria posible",
+            "se puede",
+            "cambiar la hora",
+        )
+        return any(marker in normalized for marker in complex_markers)
+
+    def _request_background_advice(
+        self,
+        call: VoiceCall,
+        normalized: str,
+        intent: VoiceIntent,
+    ) -> None:
+        reason = "complex_customer_request"
+        call.background_reply_status = "running"
+        call.background_reply_reason = reason
+        call.background_reply_text = None
+        self.background_advisor.request_advice(
+            BackgroundAdviceRequest(
+                call_id=call.call_id,
+                transcript=normalized,
+                intent=str(intent),
+                reason=reason,
+                conversation_context=_conversation_context(call),
+                reservation_context=_reservation_context(call.reservation_draft),
+            )
+        )
+
     def _missing_reservation_fields(self, draft: ReservationDraft) -> tuple[str, ...]:
         missing: list[str] = []
         if draft.party_size is None:
@@ -928,14 +998,14 @@ class VoiceReservationAgent:
 
     def _question_for_missing_field(self, field: str) -> str:
         if field == "party_size":
-            return "Para cuantas personas seria?"
+            return render_voice_reply("utter_ask_party_size")
         if field == "requested_time_text":
-            return "A que hora le gustaria la reserva?"
+            return render_voice_reply("utter_ask_requested_time")
         if field == "customer_name":
-            return "A que nombre dejamos la reserva?"
+            return render_voice_reply("utter_ask_customer_name")
         if field == "phone":
-            return "Me confirma un telefono de contacto?"
-        return "Me indica el nombre o telefono de la reserva?"
+            return render_voice_reply("utter_ask_phone")
+        return render_voice_reply("utter_ask_reservation_identifier")
 
     def _action_for_missing_field(self, field: str) -> str:
         actions = {
@@ -1001,6 +1071,24 @@ def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text.lower())
     without_accents = "".join(char for char in normalized if not unicodedata.combining(char))
     return re.sub(r"\s+", " ", without_accents).strip()
+
+
+def _conversation_context(call: VoiceCall) -> tuple[str, ...]:
+    return tuple(
+        f"{turn.speaker}: {turn.transcript}" for turn in call.turns[-6:] if turn.transcript.strip()
+    )
+
+
+def _reservation_context(draft: ReservationDraft) -> dict[str, object]:
+    return {
+        "party_size": draft.party_size,
+        "requested_date_text": draft.requested_date_text,
+        "requested_time_text": draft.requested_time_text,
+        "customer_name": draft.customer_name,
+        "customer_name_confirmed": draft.customer_name_confirmed,
+        "phone_present": draft.phone is not None,
+        "preferred_zone_id": draft.preferred_zone_id,
+    }
 
 
 def _extract_party_size(normalized: str) -> int | None:

@@ -58,6 +58,31 @@ def test_prepare_text_for_tts_applies_castilian_neutral_profile() -> None:
     )
 
 
+def test_prepare_text_for_tts_applies_castilian_service_profile() -> None:
+    assert build_tts_adapter("piper", voice_profile="castilian_service").config.speed == 0.99
+    assert prepare_text_for_tts(
+        "Entiendo. Lo compruebo un momento. Si quiere consultar la carta u otra informacion.",
+        voice_profile="castilian_service",
+    ).startswith("De acuerdo. Lo reviso un momento.")
+    assert (
+        prepare_text_for_tts(
+            "Me confirma un numero de telefono de contacto?",
+            voice_profile="castilian_service",
+        )
+        == "Perfecto. ¿Me confirma un teléfono de contacto?"
+    )
+
+
+def test_prepare_text_for_tts_does_not_pause_after_phone_label_without_digits() -> None:
+    assert (
+        prepare_text_for_tts(
+            "Me confirma un telefono de contacto?",
+            voice_profile="castilian_neutral",
+        )
+        == "Perfecto. ¿Me confirma un teléfono de contacto?"
+    )
+
+
 def test_prepare_text_for_tts_adds_castilian_information_focus() -> None:
     assert prepare_text_for_tts(
         "Reserva confirmada para 2 personas el 02/05/2026 a las 21:30. Telefono 600111222",
