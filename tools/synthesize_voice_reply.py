@@ -15,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 def main() -> None:
+    from services.voice.audio_effects import VOICE_POSTPROCESS_PRESETS, postprocess_voice_wav
     from services.voice.response_compressor import (
         DEFAULT_OLLAMA_GEMMA4_MODEL,
         DEFAULT_OLLAMA_URL,
@@ -97,6 +98,17 @@ def main() -> None:
     parser.add_argument("--ollama-num-predict", type=int, default=24)
     parser.add_argument("--ollama-num-ctx", type=int, default=512)
     parser.add_argument("--ollama-num-thread", type=int, default=None)
+    parser.add_argument(
+        "--voice-postprocess",
+        default="none",
+        choices=VOICE_POSTPROCESS_PRESETS,
+        help="Postprocesado Rust del WAV: clarity, warm o phone.",
+    )
+    parser.add_argument(
+        "--voice-postprocessor-path",
+        default=None,
+        help="Ruta opcional al binario Rust de postprocesado de voz.",
+    )
     parser.add_argument("--play", action="store_true")
     args = parser.parse_args()
     model_path = args.model_path
@@ -131,6 +143,11 @@ def main() -> None:
     )
     compression_result = compressor.compress(args.text)
     result = adapter.synthesize_to_file(compression_result.output_text, args.output)
+    postprocess_result = postprocess_voice_wav(
+        args.output,
+        preset=args.voice_postprocess,
+        processor_path=args.voice_postprocessor_path,
+    )
     if args.play:
         _play_wav(args.output)
     print(
@@ -138,6 +155,7 @@ def main() -> None:
             {
                 "compression": _to_jsonable(compression_result),
                 "tts": _to_jsonable(result),
+                "voice_postprocess": _to_jsonable(postprocess_result),
             },
             ensure_ascii=False,
             indent=2,

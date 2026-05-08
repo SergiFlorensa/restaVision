@@ -1,4 +1,9 @@
 from services.voice.agent import VoiceReservationAgent
+from services.voice.audio_effects import (
+    VOICE_POSTPROCESS_PRESETS,
+    VoicePostprocessResult,
+    postprocess_voice_wav,
+)
 from services.voice.background_advisor import (
     BackgroundAdviceRequest,
     BackgroundAdviceResult,
@@ -69,7 +74,9 @@ __all__ = [
     "VoiceReplyCompressionConfig",
     "VoiceReplyCompressionResult",
     "VoiceReplyTemplate",
+    "VoicePostprocessResult",
     "VOICE_REPLY_TEMPLATES",
+    "VOICE_POSTPROCESS_PRESETS",
     "VOICE_RENDERING_PROFILES",
     "BASELINE_VOICE_EVALUATION_CASES",
     "BackgroundAdviceRequest",
@@ -80,6 +87,7 @@ __all__ = [
     "build_voice_reply_compressor",
     "evaluate_voice_agent_baseline",
     "export_voice_reply_catalog",
+    "postprocess_voice_wav",
     "render_voice_reply",
     "voice_reply_template_for",
 ]

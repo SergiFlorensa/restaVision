@@ -17,6 +17,7 @@ if str(ROOT_DIR) not in sys.path:
 def main() -> None:
     from services.events.service import RestaurantMVPService
     from services.voice.agent import VoiceReservationAgent
+    from services.voice.audio_effects import VOICE_POSTPROCESS_PRESETS
     from services.voice.audio_quality import (
         evaluate_transcript_quality,
         read_pcm16_wav,
@@ -87,6 +88,17 @@ def main() -> None:
     )
     parser.add_argument("--tts-cache-dir", type=Path, default=Path("data/local_samples/tts_cache"))
     parser.add_argument("--no-tts-cache", action="store_true")
+    parser.add_argument(
+        "--voice-postprocess",
+        default="none",
+        choices=VOICE_POSTPROCESS_PRESETS,
+        help="Postprocesado Rust para salida TTS: clarity, warm o phone.",
+    )
+    parser.add_argument(
+        "--voice-postprocessor-path",
+        default=None,
+        help="Ruta opcional al binario Rust de postprocesado de voz.",
+    )
     parser.add_argument(
         "--reply-compressor",
         default="none",
@@ -213,7 +225,14 @@ def main() -> None:
         _precache_critical_replies(tts_adapter, args.output_dir)
         greeting_path = args.output_dir / "turn_00_opening_greeting.wav"
         greeting_tts = tts_adapter.synthesize_to_file(args.opening_greeting, greeting_path)
+        greeting_postprocess = _postprocess_reply_audio(
+            greeting_path,
+            preset=args.voice_postprocess,
+            processor_path=args.voice_postprocessor_path,
+        )
         print(f"Agente: {greeting_tts.text}")
+        if greeting_postprocess.applied:
+            print(json.dumps({"opening_voice_postprocess": asdict(greeting_postprocess)}))
         if args.play:
             _play_wav(greeting_path, sounddevice_module=sd)
     print("Pulsa Enter para grabar cada turno. Escribe q y Enter para salir.")
@@ -285,7 +304,13 @@ def main() -> None:
             compression_result = reply_compressor.compress(reply_text)
             compression_payload = asdict(compression_result)
             tts_result = tts_adapter.synthesize_to_file(compression_result.output_text, tts_path)
+            postprocess_result = _postprocess_reply_audio(
+                tts_path,
+                preset=args.voice_postprocess,
+                processor_path=args.voice_postprocessor_path,
+            )
             tts_payload = asdict(tts_result)
+            tts_payload["voice_postprocess"] = asdict(postprocess_result)
             if args.play:
                 _play_wav(tts_path, sounddevice_module=sd)
 
@@ -322,6 +347,11 @@ def main() -> None:
                     follow_up.reply_text,
                     follow_up_path,
                 )
+                follow_up_postprocess = _postprocess_reply_audio(
+                    follow_up_path,
+                    preset=args.voice_postprocess,
+                    processor_path=args.voice_postprocessor_path,
+                )
                 print(
                     json.dumps(
                         _to_jsonable(
@@ -332,6 +362,7 @@ def main() -> None:
                                     "action_payload": follow_up.action_payload,
                                 },
                                 "tts": asdict(follow_up_tts),
+                                "voice_postprocess": asdict(follow_up_postprocess),
                             }
                         ),
                         ensure_ascii=False,
@@ -380,6 +411,21 @@ def _wait_for_background_reply(
             return result
         sleep(0.25)
     return None
+
+
+def _postprocess_reply_audio(
+    path: Path,
+    *,
+    preset: str,
+    processor_path: str | None,
+) -> Any:
+    from services.voice.audio_effects import postprocess_voice_wav
+
+    return postprocess_voice_wav(
+        path,
+        preset=preset,
+        processor_path=processor_path,
+    )
 
 
 def _is_short_conversation_reply(normalized_text: str) -> bool:
